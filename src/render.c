@@ -206,6 +206,29 @@ void render_page(Canvas *c, Font *font, const Geometry *g, const Book *b,
                                    scale, ink(theme, INK_BLACK), 0);
                 }
             }
+        } else if (l->kind == L_CAND) {
+            /* pinyin candidates: up to 8 boxed UTF-8 slots, 5 cells apart.
+             * Each char is 3 UTF-8 bytes; slot 7 may hold U+2026 = more. */
+            const char *cs = l->text ? l->text : "";
+            int n = (int)strlen(cs) / 3;
+            int press = (i == press_line);
+            for (int k = 0; k < KEY_CAND_SLOTS; k++) {
+                int kx = mx + k * KEY_CAND_STRIDE * g->cell_w + 2;
+                int kw = KEY_CAND_STRIDE * g->cell_w - 4;
+                int kh = g->cell_h + 2 * scale;
+                const char *ch = (k < n) ? cs + k * 3 : "";
+                int tw = font_text_width(font, ch, scale);
+                if (press) {
+                    canvas_rect(c, kx, y - scale, kw, kh, ink(theme, INK_BLACK));
+                    if (ch[0]) font_draw_text(font, c, kx + (kw - tw) / 2, y,
+                                              ch, scale, ink(theme, INK_WHITE), 1);
+                } else {
+                    canvas_frame(c, kx, y - scale, kw, kh,
+                                 ink(theme, INK_BLACK), scale > 1 ? 2 : 1);
+                    if (ch[0]) font_draw_text(font, c, kx + (kw - tw) / 2, y,
+                                              ch, scale, ink(theme, INK_BLACK), 0);
+                }
+            }
         } else if (l->kind == L_BTN) {
             /* wide centred button (登 录): frame + label, inverts on press */
             int tw = font_text_width(font, l->text ? l->text : "", scale);

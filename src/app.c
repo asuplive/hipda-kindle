@@ -9,6 +9,7 @@
 #include "md5.h"
 #include "net.h"
 #include "image.h"
+#include "pinyin.h"
 #include "render.h"
 #include "ui.h"
 #include "util.h"
@@ -74,6 +75,8 @@ static const char *kKeyRows[] = {
 #define KEY_ROWS_PER_PAGE 3
 #define KEY_PAGES ((int)(sizeof(kKeyRows) / sizeof(kKeyRows[0]) / KEY_ROWS_PER_PAGE))
 #define KEY_CTRL_ID 100
+#define KEY_CAND_ID 101        /* pinyin candidate row */
+#define KEY_PINYIN_PAGE 3      /* kb_page 3 = Chinese input (search only) */
 /* control row buttons, left to right (6 buttons, 6 cells each — see layout.h) */
 #define KEY_CTRL_SH 0
 #define KEY_CTRL_PG 1
@@ -120,13 +123,17 @@ typedef struct {
     int      cal_raw[4][2];            /* calibration: raw coords per corner */
     int      input_mode;               /* 1 = login username, 2 = password, 3 = search */
     int      login_field;              /* 0 = username, 1 = password */
-    int      kb_page;                 /* keyboard page: 0=lower 1=upper 2=symbol */
+    int      kb_page;                 /* keyboard page: 0=lower 1=upper 2=symbol 3=pinyin */
+    char     pinyin_buf[48];          /* typed pinyin letters (Chinese page) */
+    int      cand_page;               /* candidate list page (7 per page)    */
     int      kb_shift_once;           /* one-shot capitalise after Shift on lower page */
     int      quit_now;                 /* set by the Quit menu item */
     char     login_user[HIPDA_SHORT_LEN];
     char     login_pass[128];
     char     search_term[128];
     Str      img_urls;                 /* URLs of the current thread's images, in order */
+    Str      list_urls;                /* relative URLs of the current msg/notice list */
+    int      list_kind;                /* 0 = thread list, 1 = url list (pm/notice)     */
     char     msg_title[HIPDA_NAME_LEN];
     char     msg_body[1024];
 #ifdef PC_BUILD
@@ -590,17 +597,21 @@ static int show_thread(App *a, int tid, int page, int append, int refresh) {
         }
     }
     int from_topics = (!append && a->view == V_TOPICS);
-    if (!append)
-        app_message(a, "正在加载…", "正在从论坛读取帖子正文。\n点任意位置可取消。");
-    /* Keep the list so Back is instant — but only after the loading screen is
-     * painted, because the swap leaves a scratch Book in a->book. */
+    int from_fav = (!append && a->view == V_FAVLIST);
+    (void)from_fav;
+    /* Keep the list so Back is instant — but only once the loading screen is
+     * painted (or skipped entirely on a cache hit), because the swap leaves
+     * a scratch Book in a->book. Favourites rebuild their own list on back. */
     if (from_topics)
         snap_put(&a->snap_topics, &a->book, a->cur_fid, a->topic_page,
                  a->topic_last, a->page_index, a->sel_line);
     char url[HIPDA_URL_LEN];
     net_url_thread(url, sizeof(url), &a->cfg, tid, page);
     Str html; str_init(&html);
-    int fr = fetch_or_message(a, url, &html, refresh);
+    /* cache hit = instant open, no loading flash; refresh (top-right ring)
+     * always goes to the network */
+    int fr = (!refresh && net_peek(&a->cfg, url, &html) == NET_OK)
+             ? 0 : fetch_or_message(a, url, &html, refresh);
     if (fr) {
         str_free(&html);
         if (fr == -2 && !append) resume_after_cancel(a);
@@ -882,51 +893,123 @@ static void show_fav_cache(App *a) {
     a->view_before_msg = V_MENU;
 }
 
-/* The favourites list, ZhihuReader-style: one line per saved thread, tap to
- * read it in full (offline cache is used whenever present). */
-static void show_fav_list(App *a) {
+/* Generic "my threads" list (favourites / my posts / my replies): one line
+ * per thread, tap to read in full. Disk cache is used first so re-opening is
+ * instant; the top-right refresh ring always refetches. */
+static void show_my_list(App *a, const char *title, const char *path) {
     a->in_fav = 0;
-    const char *base = "my.php?item=favorites&type=thread";
     char url[HIPDA_URL_LEN];
-    snprintf(url, sizeof(url), "%s%s%s", a->cfg.forum_server, HIPDA_FORUM_PATH, base);
+    snprintf(url, sizeof(url), "%s%s%s", a->cfg.forum_server, HIPDA_FORUM_PATH, path);
 
-    app_message(a, "我的收藏", "正在读取收藏列表…\n点屏幕可中止。");
+    char prog[128];
+    snprintf(prog, sizeof(prog), "正在读取%s…\n点屏幕可中止。", title);
     Str html; str_init(&html);
-    int fr = fetch_or_message(a, url, &html, 1);
-    if (fr) {
-        str_free(&html);
-        if (fr == -2) resume_after_cancel(a);
-        return;
+    int cached = net_peek(&a->cfg, url, &html) == NET_OK;
+    int fr = 0;
+    if (!cached) {
+        app_message(a, title, prog);
+        fr = fetch_or_message(a, url, &html, 1);
+        if (fr) {
+            str_free(&html);
+            if (fr == -2) resume_after_cancel(a);
+            return;
+        }
     }
-    TopicList fav;
-    int n = discuz_parse_favorites(html.data, &fav);
+    TopicList list;
+    int n = discuz_parse_favorites(html.data, &list);
     str_free(&html);
     if (n <= 0) {
-        app_message(a, "收藏为空",
-                    "没有解析到收藏帖子。\n（需要登录，且至少收藏过一个帖子）");
+        char body[256];
+        snprintf(body, sizeof(body),
+                 "没有解析到条目。\n（需要登录；若已登录则可能页面为空）");
+        app_message(a, title, body);
         a->view_before_msg = V_MENU;
         return;
     }
 
     book_reset(&a->book);
-    str_copy(a->book.title, sizeof(a->book.title), "我的收藏");
+    str_copy(a->book.title, sizeof(a->book.title), title);
     a->book.subtitle[0] = 0;
     a->book.fid = 0; a->book.tid = 0;
-    char note[64];
-    snprintf(note, sizeof(note), "共 %d 篇 · 点条目阅读（已缓存离线可看）", n);
+    char note[96];
+    snprintf(note, sizeof(note), "共 %d 条 · 点条目阅读（缓存离线可看）", n);
     book_wrap_text(&a->book, &a->geo, L_NOTE, note, 0, 0, 1);
     book_add_line(&a->book, L_BLANK, "", 0, 0, 1);
     for (int i = 0; i < n; i++) {
         char row[HIPDA_NAME_LEN];
-        const char *t = fav.v[i].title[0] ? fav.v[i].title : "（无标题）";
+        const char *t = list.v[i].title[0] ? list.v[i].title : "（无标题）";
         snprintf(row, sizeof(row), "· %s", t);
-        book_wrap_text(&a->book, &a->geo, L_ITEM, row, 0, fav.v[i].tid, 1);
+        book_wrap_text(&a->book, &a->geo, L_ITEM, row, 0, list.v[i].tid, 1);
         book_add_line(&a->book, L_BLANK, "", 0, 0, 1);
     }
     book_finalize(&a->book, &a->geo);
-    topic_list_free(&fav);
+    topic_list_free(&list);
 
     a->view = V_FAVLIST;
+    a->list_kind = 0;
+    a->page_index = 0; a->sel_line = -1;
+    a->cur_fid = 0; a->cur_tid = 0;
+    app_draw(a, NULL);
+}
+
+/* The favourites list, ZhihuReader-style: one line per saved thread, tap to
+ * read it in full (offline cache is used whenever present). */
+static void show_fav_list(App *a) {
+    show_my_list(a, "我的收藏", "my.php?item=favorites&type=thread");
+}
+
+/* PM / notice lists: one line per message, tap to read the message text. */
+static void show_msg_list(App *a, const char *title, const char *path) {
+    a->in_fav = 0;
+    char url[HIPDA_URL_LEN];
+    snprintf(url, sizeof(url), "%s%s%s", a->cfg.forum_server, HIPDA_FORUM_PATH, path);
+
+    char prog[128];
+    snprintf(prog, sizeof(prog), "正在读取%s…\n点屏幕可中止。", title);
+    Str html; str_init(&html);
+    int cached = net_peek(&a->cfg, url, &html) == NET_OK;
+    int fr = 0;
+    if (!cached) {
+        app_message(a, title, prog);
+        fr = fetch_or_message(a, url, &html, 1);
+        if (fr) {
+            str_free(&html);
+            if (fr == -2) resume_after_cancel(a);
+            return;
+        }
+    }
+    TopicList list;
+    int n = discuz_parse_msglist(html.data, &list, &a->list_urls);
+    str_free(&html);
+    if (n <= 0) {
+        char body[256];
+        snprintf(body, sizeof(body),
+                 "没有解析到条目。\n（需要登录；若已登录则可能列表为空）");
+        app_message(a, title, body);
+        a->view_before_msg = V_MENU;
+        return;
+    }
+
+    book_reset(&a->book);
+    str_copy(a->book.title, sizeof(a->book.title), title);
+    a->book.subtitle[0] = 0;
+    a->book.fid = 0; a->book.tid = 0;
+    char note[96];
+    snprintf(note, sizeof(note), "共 %d 条 · 点条目查看", n);
+    book_wrap_text(&a->book, &a->geo, L_NOTE, note, 0, 0, 1);
+    book_add_line(&a->book, L_BLANK, "", 0, 0, 1);
+    for (int i = 0; i < n; i++) {
+        char row[HIPDA_NAME_LEN];
+        const char *t = list.v[i].title[0] ? list.v[i].title : "（无标题）";
+        snprintf(row, sizeof(row), "· %s", t);
+        book_wrap_text(&a->book, &a->geo, L_ITEM, row, 0, list.v[i].tid, 1);
+        book_add_line(&a->book, L_BLANK, "", 0, 0, 1);
+    }
+    book_finalize(&a->book, &a->geo);
+    topic_list_free(&list);
+
+    a->view = V_FAVLIST;
+    a->list_kind = 1;
     a->page_index = 0; a->sel_line = -1;
     a->cur_fid = 0; a->cur_tid = 0;
     app_draw(a, NULL);
@@ -936,12 +1019,12 @@ static void menu_action(App *a, int idx) {
     switch (idx) {
         case 1: show_forums(a); break;
         case 2: show_search(a); break;
-        case 3: show_url_text(a, "我的帖子", "my.php?item=threads"); break;
-        case 4: show_url_text(a, "我的回复", "my.php?item=posts"); break;
+        case 3: show_my_list(a, "我的帖子", "my.php?item=threads"); break;
+        case 4: show_my_list(a, "我的回复", "my.php?item=posts"); break;
         case MENU_FAVOURITES: show_fav_list(a); break;
         case MENU_FAV_CACHE:  show_fav_cache(a); break;
-        case MENU_PM:         show_url_text(a, "短消息", "pm.php"); break;
-        case MENU_NOTICE:     show_url_text(a, "帖子消息", "notice.php"); break;
+        case MENU_PM:         show_msg_list(a, "短消息", "pm.php"); break;
+        case MENU_NOTICE:     show_msg_list(a, "帖子消息", "notice.php"); break;
         case MENU_SETTINGS:   show_settings(a); break;
         case MENU_THEME:      toggle_theme(a); break;
         case MENU_QUIT:
@@ -992,7 +1075,8 @@ static void input_field(char *out, size_t cap, const char *label,
 }
 
 static void build_input_book(App *a, const char *title, const char *field0,
-                             const char *field1, int editing) {
+                             const char *field1, int editing,
+                             const char *btn_label) {
     book_reset(&a->book);
     str_copy(a->book.title, sizeof(a->book.title), title);
     a->book.subtitle[0] = 0;
@@ -1012,14 +1096,37 @@ static void build_input_book(App *a, const char *title, const char *field0,
     /* the login button sits directly under the two fields; Enter ([回车] on
      * the control row) does the same thing */
     book_add_line(&a->book, L_BLANK, "", 0, 0, 1);
-    book_wrap_text(&a->book, &a->geo, L_BTN, "登  录", 0, 91, 1);
+    book_wrap_text(&a->book, &a->geo, L_BTN, btn_label, 0, 91, 1);
     book_add_line(&a->book, L_BLANK, "", 0, 0, 1);
     book_wrap_text(&a->book, &a->geo, L_NOTE,
                    "[Sh]大小写 [Pg]数字符号 [回车]=登录", 0, 0, 1);
     if (roomy) book_add_line(&a->book, L_BLANK, "", 0, 0, 1);
 
-    /* current keyboard page */
-    int base = a->kb_page * KEY_ROWS_PER_PAGE;
+    /* Chinese input page (search only): typed pinyin + candidates */
+    if (a->kb_page == KEY_PINYIN_PAGE && a->input_mode == 3) {
+        char pyline[HIPDA_NAME_LEN];
+        snprintf(pyline, sizeof(pyline), "拼音：%s_", a->pinyin_buf);
+        book_wrap_text(&a->book, &a->geo, L_META, pyline, 0, 0, 1);
+        if (a->pinyin_buf[0]) {
+            char cand[KEY_CAND_SLOTS * 3 + 1] = {0};
+            char slots[7][4];
+            int start = a->cand_page * 7;
+            int total = pinyin_candidates(a->pinyin_buf, start, slots, 7);
+            for (int k = 0; k < total; k++) memcpy(cand + k * 3, slots[k], 3);
+            if (total == 7 && start + 7 < total)
+                memcpy(cand + 7 * 3, "\xe2\x80\xa6", 3);   /* U+2026 = more */
+            book_add_line(&a->book, L_BLANK, "", 0, 0, 1);
+            book_wrap_text(&a->book, &a->geo, L_CAND, cand, 0, KEY_CAND_ID, 1);
+        } else {
+            book_wrap_text(&a->book, &a->geo, L_NOTE,
+                           "输入拼音 · 空格选首字 · [Pg] 回英文", 0, 0, 1);
+        }
+        book_add_line(&a->book, L_BLANK, "", 0, 0, 1);
+        if (roomy) book_add_line(&a->book, L_BLANK, "", 0, 0, 1);
+    }
+
+    /* current keyboard page (pinyin page shows the lower-case letters) */
+    int base = (a->kb_page == KEY_PINYIN_PAGE) ? 0 : a->kb_page * KEY_ROWS_PER_PAGE;
     for (int r = 0; r < KEY_ROWS_PER_PAGE; r++) {
         book_wrap_text(&a->book, &a->geo, L_KEYS, kKeyRows[base + r], 0, 0, 1);
         if (roomy) book_add_line(&a->book, L_BLANK, "", 0, 0, 1);
@@ -1034,14 +1141,14 @@ static void build_login_book(App *a) {
     char f0[HIPDA_NAME_LEN / 2], f1[HIPDA_NAME_LEN / 2];
     input_field(f0, sizeof(f0), "用户名：", a->login_user, a->login_field == 0, 0);
     input_field(f1, sizeof(f1), "密码：  ", a->login_pass, a->login_field == 1, 1);
-    build_input_book(a, "登录 4d4y 论坛", f0, f1, a->login_field);
+    build_input_book(a, "登录 4d4y 论坛", f0, f1, a->login_field, "登  录");
 }
 
 static void build_search_book(App *a) {
     char f0[HIPDA_NAME_LEN / 2], f1[HIPDA_NAME_LEN / 2];
     input_field(f0, sizeof(f0), "关键字：", a->search_term, 1, 0);
-    str_copy(f1, sizeof(f1), "（点 [Ok] 开始搜索）");
-    build_input_book(a, "搜索帖子", f0, f1, 2);
+    str_copy(f1, sizeof(f1), "（点 [回车] 或下方按钮开始搜索）");
+    build_input_book(a, "搜索帖子", f0, f1, 2, "搜  索");
 }
 
 static void build_settings_book(App *a) {
@@ -1184,6 +1291,28 @@ static void input_append(App *a, char ch) {
         a->kb_page = 0;
     }
 }
+/* Append a UTF-8 string (a Chinese character picked from candidates). */
+static void input_append_utf8(App *a, const char *ch) {
+    char *buf = input_buf(a);
+    size_t cap = input_cap(a);
+    size_t n = strlen(buf);
+    size_t L = strlen(ch);
+    if (n + L + 1 < cap) {
+        memcpy(buf + n, ch, L);
+        buf[n + L] = 0;
+    }
+}
+
+/* Pick the candidate at the given absolute slot (0-based across pages). */
+static void pinyin_pick(App *a, int slot) {
+    char one[1][4];
+    if (pinyin_candidates(a->pinyin_buf, slot, one, 1) > slot) {
+        input_append_utf8(a, one[0]);
+        a->pinyin_buf[0] = 0;
+        a->cand_page = 0;
+    }
+}
+
 static void input_backspace(App *a) {
     char *buf = input_buf(a);
     size_t n = strlen(buf);
@@ -1250,16 +1379,32 @@ static void input_view_action(App *a, Action act, int line_index, int tap_x) {
                 else { a->kb_page = 1; a->kb_shift_once = 1; }
                 input_rebuild(a);
                 return;
-            case KEY_CTRL_PG:          /* Page: letters <-> digits/symbols */
-                a->kb_page = (a->kb_page == 2) ? 0 : 2;
+            case KEY_CTRL_PG:          /* Page: cycle letters/symbols/pinyin */
+                if (a->input_mode == 3)
+                    a->kb_page = (a->kb_page + 1) % 4;
+                else
+                    a->kb_page = (a->kb_page + 1) % 3;
                 a->kb_shift_once = 0;
+                a->cand_page = 0;
                 input_rebuild(a);
                 return;
-            case KEY_CTRL_SP:          /* space */
+            case KEY_CTRL_SP:          /* space = pick first candidate */
+                if (a->kb_page == KEY_PINYIN_PAGE && a->pinyin_buf[0]) {
+                    pinyin_pick(a, a->cand_page * 7);
+                    input_rebuild(a);
+                    return;
+                }
                 input_append(a, ' ');
                 input_rebuild(a);
                 return;
-            case KEY_CTRL_BK:          /* backspace */
+            case KEY_CTRL_BK:          /* backspace: pinyin first, then text */
+                if (a->kb_page == KEY_PINYIN_PAGE && a->pinyin_buf[0]) {
+                    size_t n = strlen(a->pinyin_buf);
+                    a->pinyin_buf[n - 1] = 0;
+                    if (!a->pinyin_buf[0]) a->cand_page = 0;
+                    input_rebuild(a);
+                    return;
+                }
                 input_backspace(a);
                 input_rebuild(a);
                 return;
@@ -1271,6 +1416,31 @@ static void input_view_action(App *a, Action act, int line_index, int tap_x) {
                 return;
             default: return;
         }
+    }
+
+    /* ---- pinyin candidate row: 8 slots, 5 cells apart ---- */
+    if (id == KEY_CAND_ID) {
+        const char *cs = l->text ? l->text : "";
+        int n = (int)strlen(cs) / 3;
+        int step = a->geo.cell_w * KEY_CAND_STRIDE;
+        if (step < 1) step = 1;
+        int col = (tap_x - a->geo.margin_x) / step;
+        if (col < 0 || col > 7) return;
+        if (col == 7 && n == 8 &&
+            memcmp(cs + 21, "\xe2\x80\xa6", 3) == 0) {
+            a->cand_page++;                       /* "..." slot: next page */
+            input_rebuild(a);
+            return;
+        }
+        if (col >= n) return;
+        char one[4];
+        memcpy(one, cs + col * 3, 3);
+        one[3] = 0;
+        input_append_utf8(a, one);
+        a->pinyin_buf[0] = 0;
+        a->cand_page = 0;
+        input_rebuild(a);
+        return;
     }
 
     /* ---- character rows: pick the key by x, matching the painted grid ---- */
@@ -1288,6 +1458,19 @@ static void input_view_action(App *a, Action act, int line_index, int tap_x) {
     if (pos < 0 || pos >= len) return;
     char ch = keys[pos];
     if (ch == ' ') return;                 /* blank cell between keys */
+    if (a->kb_page == KEY_PINYIN_PAGE) {
+        /* letters feed the pinyin buffer, not the search term directly */
+        if (ch >= 'a' && ch <= 'z') {
+            size_t n = strlen(a->pinyin_buf);
+            if (n + 1 < sizeof(a->pinyin_buf)) {
+                a->pinyin_buf[n] = ch;
+                a->pinyin_buf[n + 1] = 0;
+                a->cand_page = 0;
+            }
+            input_rebuild(a);
+        }
+        return;
+    }
     input_append(a, ch);
     input_rebuild(a);
 }
@@ -1531,7 +1714,25 @@ static void activate(App *a, int line_index) {
     else if (a->view == V_SETTINGS) settings_action(a, hit);
     else if (a->view == V_FORUMS) show_topics(a, id, 1, 0, 0);
     else if (a->view == V_TOPICS) show_thread(a, id, 1, 0, 0);
-    else if (a->view == V_FAVLIST) { a->in_fav = 1; show_thread(a, id, 1, 0, 0); }
+    else if (a->view == V_FAVLIST) {
+        if (a->list_kind == 1) {
+            /* pm/notice list: open the tapped message as plain text */
+            char path[HIPDA_URL_LEN] = {0};
+            const char *p = a->list_urls.data;
+            for (int i = 1; p && *p && i <= id; i++) {
+                const char *nl = strchr(p, '\n');
+                size_t n = nl ? (size_t)(nl - p) : strlen(p);
+                if (i == id && n < sizeof(path)) {
+                    memcpy(path, p, n); path[n] = 0; break;
+                }
+                p = nl ? nl + 1 : NULL;
+            }
+            if (path[0]) show_url_text(a, "消息内容", path);
+        } else {
+            a->in_fav = 1;
+            show_thread(a, id, 1, 0, 0);
+        }
+    }
 }
 
 static void move_sel(App *a, int dir) {
@@ -1722,6 +1923,7 @@ int app_run(const AppOptions *opt) {
     book_init(&a.snap_topics.book, &a.geo);
     book_init(&a.snap_thread.book, &a.geo);
     str_init(&a.img_urls);
+    str_init(&a.list_urls);
     net_init(&a.cfg);
     input_set_screen(a.geo.w, a.geo.h);
     input_set_calib(a.cfg.cal_swap, a.cfg.cal_flip_x, a.cfg.cal_flip_y);
@@ -1887,6 +2089,7 @@ done:
     book_free(&a.snap_topics.book);
     book_free(&a.snap_thread.book);
     str_free(&a.img_urls);
+    str_free(&a.list_urls);
     canvas_free(&a.canvas);
     font_free(&a.font);
     ui_close();

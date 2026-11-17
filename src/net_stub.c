@@ -30,6 +30,13 @@ void net_url_login(char *out, size_t cap, const Config *c) {
     char base[HIPDA_URL_LEN]; base_url(c, base, sizeof(base));
     snprintf(out, cap, "%slogging.php?action=login", base);
 }
+int net_peek(const Config *c, const char *url, Str *out_utf8) {
+    /* PC preview keeps pages in its own cache; reuse net_fetch(refresh=0)
+     * semantics by reading the same hash file if it exists. */
+    extern int net_fetch(const Config *c, const char *url, Str *out, int refresh);
+    return net_fetch(c, url, out_utf8, 0);
+}
+
 int net_fetch_file(const Config *c, const char *url, const char *out_path,
                    size_t max_bytes) {
     (void)c; (void)url; (void)out_path; (void)max_bytes;

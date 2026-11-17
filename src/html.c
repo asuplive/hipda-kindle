@@ -232,6 +232,7 @@ static void tc_image(TextCtx *c, const HtmlIter *it) {
     char src[HIPDA_URL_LEN], file[HIPDA_URL_LEN], alt[256];
     int have_src = !html_attr(it, "src", src, sizeof(src));
     int have_file = !html_attr(it, "file", file, sizeof(file));
+    (void)have_file;
     int have_alt = !html_attr(it, "alt", alt, sizeof(alt));
     if (!have_src) src[0] = 0;
     const char *leaf = strrchr(src, '/');
@@ -251,7 +252,13 @@ static void tc_image(TextCtx *c, const HtmlIter *it) {
     }
     /* Real image (attachment or inline): emit a \x02-wrapped URL on its own
      * line. layout turns it into a tappable placeholder row; images whose
-     * only purpose is decoration (smilies above) never get here. */
+     * only purpose is decoration (smilies above) never get here.
+     * Forum UI icons (images/common, images/default) and GIFs (tiny
+     * decorations or animations e-ink can't show) are skipped entirely so
+     * list rows and titles stay clean. */
+    const char *dot = strrchr(leaf, '.');
+    if (dot && str_caseeq(dot, ".gif")) return;
+    if (strstr(src, "images/common/") || strstr(src, "images/default/")) return;
     if (src[0]) {
         tc_prefix(c);
         str_append(c->out, "\n\x02");

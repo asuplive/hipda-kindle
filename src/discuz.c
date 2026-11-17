@@ -2,6 +2,9 @@
 #include "html.h"
 #include "util.h"
 
+/* defined further below; used by title extraction in the topic-list parser */
+static void strip_img_marks(char *s);
+
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -258,6 +261,7 @@ int discuz_parse_topic_list(const char *html, TopicList *out, int fid, int page)
         if (item.tid > 0) {
             extract_a_text(slice, "viewthread.php?tid=", item.title, sizeof(item.title));
             if (!item.title[0]) extract_a_text(slice, "thread-", item.title, sizeof(item.title));
+            strip_img_marks(item.title);
             extract_a_text(slice, "space.php?uid=", item.author, sizeof(item.author));
             if (!item.author[0]) extract_a_text(slice, "space-uid-", item.author, sizeof(item.author));
             const char *author_cell = strstr(slice, "class=\"author\"");
@@ -338,6 +342,67 @@ int discuz_parse_favorites(const char *html, TopicList *out) {
         }
         p = next;
         if (p <= html) break;
+    }
+    return out->n;
+}
+
+/* Remove \x02...\x02 image-URL spans that html_to_text leaves inside anchor
+ * text (title links often wrap a folder icon together with the title). */
+static void strip_img_marks(char *s) {
+    char *r = s, *w = s;
+    while (*r) {
+        if ((unsigned char)*r == 0x02) {
+            r++;
+            while (*r && (unsigned char)*r != 0x02) r++;
+            if (*r) r++;
+            continue;
+        }
+        *w++ = *r++;
+    }
+    *w = 0;
+}
+
+/* PM / notice lists: walk every <a href="...">anchor</a> whose href points
+ * at a concrete message (pm.php...pmid=N / notice.php...id=N), keep the
+ * anchor text, and record the relative URL. Index (1-based) lands in tid so
+ * the app can map a tapped row back to its URL. */
+int discuz_parse_msglist(const char *html, TopicList *out, Str *urls) {
+    if (!html || !out) return -1;
+    memset(out, 0, sizeof(*out));
+    out->page = 1;
+    str_clear(urls);
+
+    const char *p = html;
+    int idx = 0;
+    while ((p = strstr(p, "href=\"")) != NULL) {
+        const char *e = strchr(p + 6, '"');
+        if (!e) break;
+        size_t ulen = (size_t)(e - (p + 6));
+        if (ulen >= 512) { p = e; continue; }
+        char href[512];
+        memcpy(href, p + 6, ulen);
+        href[ulen] = 0;
+
+        int is_msg = (strstr(href, "pm.php") && strstr(href, "pmid=")) ||
+                     (strstr(href, "notice.php") && strstr(href, "id="));
+        if (!is_msg) { p = e; continue; }
+
+        const char *ae = strstr(e + 1, "</a>");
+        if (!ae) break;
+        Str text; str_init(&text);
+        html_to_text(e + 1, (size_t)(ae - (e + 1)), &text);
+        char *t = str_trim(text.data);
+        if (t[0]) {
+            Topic item;
+            memset(&item, 0, sizeof(item));
+            item.tid = ++idx;
+            str_copy(item.title, sizeof(item.title), t);
+            topic_list_push(out, &item);
+            str_append(urls, href);
+            str_append(urls, "\n");
+        }
+        str_free(&text);
+        p = ae + 4;
     }
     return out->n;
 }
@@ -426,6 +491,7 @@ int discuz_parse_thread(const char *html, ThreadPage *out, int tid, int page) {
     if (!extract_element_text(html, "id=\"threadtitle\"", "div", title, sizeof(title))) {
         char *h = strchr(title, '\n');
         if (h) *h = 0;
+        strip_img_marks(title);
         str_copy(out->title, sizeof(out->title), str_trim(title));
     }
     if (!out->title[0]) {

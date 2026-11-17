@@ -25,6 +25,9 @@ int  net_fetch(const Config *c, const char *url, Str *out_utf8, int refresh);
 int  net_fetch_file(const Config *c, const char *url, const char *out_path,
                     size_t max_bytes);
 
+/* Read ONLY the disk cache (no network, no UI). NET_OK if present. */
+int  net_peek(const Config *c, const char *url, Str *out_utf8);
+
 /* logging.php formhash -> POST (MD5 password) -> cdb_auth cookie. */
 int  net_login(const Config *c);
 int  net_has_auth_cookie(const Config *c);

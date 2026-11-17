@@ -23,6 +23,9 @@ int  discuz_parse_thread(const char *html, ThreadPage *out, int tid, int page);
 
 /* Favourites page: collect distinct thread ids + titles for offline caching. */
 int  discuz_parse_favorites(const char *html, TopicList *out);
+/* PM / notice lists: message links (pmid=..., notice id=...) with anchor
+ * text; out->v[i].tid = 1-based index, `urls` gets one relative path/line. */
+int  discuz_parse_msglist(const char *html, TopicList *out, Str *urls);
 /* Append an item to a TopicList (for aggregating parsed pages). */
 void topic_list_push(TopicList *t, const Topic *item);
 

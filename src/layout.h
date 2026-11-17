@@ -18,7 +18,8 @@ typedef enum {
     L_KEYS,        /* on-screen keyboard: one row of 10 boxed keys */
     L_CTRL,        /* keyboard control row: Sh/Pg/Space/Back/Enter/Cancel */
     L_BTN,         /* wide centred button ("登 录") */
-    L_IMGPH        /* image placeholder row; item_id = URL hash */
+    L_IMGPH,       /* image placeholder row; item_id = URL hash */
+    L_CAND         /* pinyin candidate row: up to 8 boxed UTF-8 chars */
 } LineKind;
 
 /* Keyboard geometry contract shared by painter and hit-test:
@@ -28,6 +29,8 @@ typedef enum {
 #define KEY_COLS 10
 #define KEY_CTRL_COLS 6
 #define KEY_CTRL_STRIDE 6
+#define KEY_CAND_STRIDE 5      /* each candidate slot is 5 cells wide */
+#define KEY_CAND_SLOTS 8
 
 typedef struct {
     LineKind kind;

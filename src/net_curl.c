@@ -173,6 +173,19 @@ static int decode_raw(const Config *c, const char *url, Str *out_utf8) {
     return out_utf8->len ? NET_OK : NET_EMPTY;
 }
 
+int net_peek(const Config *c, const char *url, Str *out_utf8) {
+    str_clear(out_utf8);
+    char cache[HIPDA_PATH_LEN];
+    cache_path(c, url, cache, sizeof(cache));
+    if (!file_exists(cache)) return NET_OFFLINE;
+    Str raw; str_init(&raw);
+    if (file_read(cache, &raw) || !raw.len) { str_free(&raw); return NET_ERR; }
+    int utf8 = discuz_detect_utf8(raw.data, raw.len);
+    text_decode(raw.data, raw.len, utf8, out_utf8);
+    str_free(&raw);
+    return out_utf8->len ? NET_OK : NET_EMPTY;
+}
+
 int net_fetch(const Config *c, const char *url, Str *out_utf8, int refresh) {
     str_clear(out_utf8);
     char cache[HIPDA_PATH_LEN];
