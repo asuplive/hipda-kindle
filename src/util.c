@@ -221,6 +221,12 @@ int parse_int(const char *s, int fallback) {
     char *e; long v = strtol(s, &e, 10);
     return (e == s) ? fallback : (int)v;
 }
+unsigned long long fnv1a(const char *s) {
+    unsigned long long h = 14695981039346656037ULL;
+    for (; s && *s; s++) { h ^= (unsigned char)*s; h *= 1099511628211ULL; }
+    return h;
+}
+
 int url_param(const char *url, const char *name, char *out, size_t cap) {
     if (!url || !name || !cap) return -1;
     size_t nl = strlen(name);

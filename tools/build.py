@@ -18,7 +18,7 @@ EXE = os.path.join(ROOT, "hipda-pc.exe" if os.name == "nt" else "hipda-pc")
 COMMON = [
     "src/util.c", "src/gbk.c", "src/html.c", "src/discuz.c", "src/raster.c",
     "src/font.c", "src/layout.c", "src/render.c", "src/config.c",
-    "src/md5.c", "src/app.c", "src/tests.c", "src/main.c",
+    "src/md5.c", "src/image.c", "src/app.c", "src/tests.c", "src/main.c",
 ]
 PC_SRC = ["src/ui_stub.c", "src/input_stub.c", "src/net_stub.c"]
 

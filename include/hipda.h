@@ -84,7 +84,9 @@ typedef struct {
     int  cal_swap;           /* touch calibration: axes swapped         */
     int  cal_flip_x;         /* touch calibration: horizontal mirrored  */
     int  cal_flip_y;         /* touch calibration: vertical mirrored    */
-    int  wfm_fast;           /* 1 = DU fast waveform, 0 = GC16 crisp    */
+    int  refresh_mode;       /* 0 all / 1 partial / 2 regal / 3 hybrid  */
+    int  rotation;           /* content rotation CW: 0/90/180/270      */
+    int  img_mode;           /* 0 = hide images, 1 = tap-to-view       */
 } Config;
 
 /* Screen geometry, filled by the active UI backend. */

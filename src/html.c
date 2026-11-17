@@ -249,11 +249,15 @@ static void tc_image(TextCtx *c, const HtmlIter *it) {
         tc_prefix(c); str_append(c->out, "[表情]"); c->newline_run = 0;
         return;
     }
-    if (strstr(src, "attachment") || strstr(src, "attachments/") ||
-        have_file || strstr(src, "forum/attachments")) {
+    /* Real image (attachment or inline): emit a \x02-wrapped URL on its own
+     * line. layout turns it into a tappable placeholder row; images whose
+     * only purpose is decoration (smilies above) never get here. */
+    if (src[0]) {
         tc_prefix(c);
-        str_append(c->out, "〔图片〕");
-        c->newline_run = 0;
+        str_append(c->out, "\n\x02");
+        str_append(c->out, src);
+        str_append(c->out, "\x02\n");
+        c->newline_run = 1;
         return;
     }
     if (have_alt && alt[0] && !str_caseeq(alt, "attach")) {

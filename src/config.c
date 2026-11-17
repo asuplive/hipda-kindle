@@ -15,7 +15,9 @@ void config_defaults(Config *c, int pc_build) {
     c->full_refresh_every = 6;
     c->timeout = 20;
     c->font_scale = 0;
-    c->wfm_fast = 1;                /* DU waveform: ~260ms per page */
+    c->refresh_mode = 3;            /* hybrid: DU + full flash every N */
+    c->rotation = 0;                /* upright by default               */
+    c->img_mode = 0;                /* placeholders only, tap to view   */
     c->nforums = 0;                 /* 0 = use the full built-in catalog */
     if (pc_build) {
         str_copy(c->config_path, sizeof(c->config_path), "config.ini");
@@ -74,7 +76,9 @@ int config_load(Config *c, const char *path) {
         else if (str_caseeq(key, "cal_swap"))     set_int(val, &c->cal_swap);
         else if (str_caseeq(key, "cal_flip_x"))   set_int(val, &c->cal_flip_x);
         else if (str_caseeq(key, "cal_flip_y"))   set_int(val, &c->cal_flip_y);
-        else if (str_caseeq(key, "wfm_fast"))     set_int(val, &c->wfm_fast);
+        else if (str_caseeq(key, "refresh_mode")) set_int(val, &c->refresh_mode);
+        else if (str_caseeq(key, "rotation"))     set_int(val, &c->rotation);
+        else if (str_caseeq(key, "img_mode"))     set_int(val, &c->img_mode);
         else if (str_caseeq(key, "forums")) {
             c->nforums = 0;
             char *tok = strtok(val, ", \t");
@@ -124,7 +128,9 @@ int config_save(const Config *c) {
     fprintf(f, "cal_swap=%d\n", c->cal_swap);
     fprintf(f, "cal_flip_x=%d\n", c->cal_flip_x);
     fprintf(f, "cal_flip_y=%d\n", c->cal_flip_y);
-    fprintf(f, "wfm_fast=%d\n", c->wfm_fast);
+    fprintf(f, "refresh_mode=%d\n", c->refresh_mode);
+    fprintf(f, "rotation=%d\n", c->rotation);
+    fprintf(f, "img_mode=%d\n", c->img_mode);
     fprintf(f, "offline=%d\n", c->offline);
     fprintf(f, "no_login=%d\n", c->no_login);
     if (c->nforums > 0) {

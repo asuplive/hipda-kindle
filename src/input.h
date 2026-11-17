@@ -14,6 +14,7 @@ typedef enum {
     ACT_REFRESH,
     ACT_PAGE_PREV,   /* previous forum page (footer button) */
     ACT_PAGE_NEXT,   /* next forum page (footer button)     */
+    ACT_IMGV,        /* open the tapped image placeholder   */
     ACT_HOME,
     ACT_QUIT
 } Action;

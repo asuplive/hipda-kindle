@@ -30,6 +30,12 @@ void net_url_login(char *out, size_t cap, const Config *c) {
     char base[HIPDA_URL_LEN]; base_url(c, base, sizeof(base));
     snprintf(out, cap, "%slogging.php?action=login", base);
 }
+int net_fetch_file(const Config *c, const char *url, const char *out_path,
+                   size_t max_bytes) {
+    (void)c; (void)url; (void)out_path; (void)max_bytes;
+    return -1;   /* PC preview: images stay placeholders */
+}
+
 int net_has_auth_cookie(const Config *c) { (void)c; return 1; }
 int net_login(const Config *c) { (void)c; return NET_OK; }
 

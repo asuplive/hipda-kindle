@@ -192,8 +192,45 @@ int book_from_topics(Book *b, const Geometry *g, const TopicList *list,
     return b->n;
 }
 
+/* Add one post body, splitting image placeholders (\x02URL\x02 lines) into
+ * tappable rows. img_urls collects every URL in encounter order; the row's
+ * item_id is the URL hash so taps can find the URL even after a snapshot
+ * round-trip. img_mode: 0 = plain "〔图片〕" text, 1 = tappable placeholder. */
+static void book_add_body(Book *b, const Geometry *g, const char *body,
+                          int forum_page, Str *img_urls, int img_mode) {
+    const char *p = body;
+    while (p && *p) {
+        const char *nl = strchr(p, '\n');
+        size_t len = nl ? (size_t)(nl - p) : strlen(p);
+        char line[2048];
+        if (len >= sizeof(line)) len = sizeof(line) - 1;
+        memcpy(line, p, len);
+        line[len] = 0;
+
+        char *m = line[0] == '\x02' ? line : NULL;
+        if (m && len >= 2 && line[len - 1] == '\x02') {
+            line[len - 1] = 0;
+            const char *url = line + 1;
+            if (img_mode == 1 && url[0]) {
+                unsigned long long h = fnv1a(url);
+                int id = (int)(h & 0x7FFFFFFF);
+                if (id == 0) id = 1;
+                if (img_urls) str_append(img_urls, url), str_append(img_urls, "\n");
+                char ph[HIPDA_NAME_LEN];
+                snprintf(ph, sizeof(ph), "[ 图片 · 点按显示 ]");
+                book_add_line(b, L_IMGPH, ph, 0, id, forum_page);
+            } else {
+                book_add_line(b, L_BODY, "〔图片〕", 0, 0, forum_page);
+            }
+        } else if (len > 0) {
+            book_wrap_text(b, g, L_BODY, line, 0, 0, forum_page);
+        }
+        p = nl ? nl + 1 : NULL;
+    }
+}
+
 int book_from_thread(Book *b, const Geometry *g, const ThreadPage *thread,
-                     int append) {
+                     int append, Str *img_urls, int img_mode) {
     if (!append) book_reset(b);
     else pad_to_page_boundary(b, g, thread->page);
     if (!append) {
@@ -215,7 +252,7 @@ int book_from_thread(Book *b, const Geometry *g, const ThreadPage *thread,
                  p->author[0] ? p->author : "匿名", p->dateline);
         if (i > 0 || append) book_add_line(b, L_SEP, "", 0, 0, thread->page);
         book_wrap_text(b, g, L_META, meta, 0, 0, thread->page);
-        book_wrap_text(b, g, L_BODY, p->body.data, 0, 0, thread->page);
+        book_add_body(b, g, p->body.data, thread->page, img_urls, img_mode);
         book_add_line(b, L_BLANK, "", 0, 0, thread->page);
     }
     book_finalize(b, g);
@@ -230,6 +267,10 @@ static const char *kind_name(LineKind k) {
         case L_ITEM:  return "item";
         case L_SEP:   return "sep";
         case L_NOTE:  return "note";
+        case L_KEYS:  return "keys";
+        case L_CTRL:  return "ctrl";
+        case L_BTN:   return "btn";
+        case L_IMGPH: return "imgph";
         default:      return "blank";
     }
 }
@@ -287,7 +328,8 @@ int book_from_menu(Book *b, const Geometry *g, const char *title,
     for (int i = 0; i < n; i++) {
         char row[HIPDA_NAME_LEN];
         snprintf(row, sizeof(row), "%d  %s", i + 1, items[i] ? items[i] : "");
-        book_wrap_text(b, g, L_ITEM, row, 0, i + 1, 1);
+        /* bold (L_TITLE): menu rows should be big and easy to hit */
+        book_wrap_text(b, g, L_TITLE, row, 0, i + 1, 1);
         book_add_line(b, L_BLANK, "", 0, 0, 1);   /* spacing = fewer mis-taps */
     }
     book_finalize(b, g);

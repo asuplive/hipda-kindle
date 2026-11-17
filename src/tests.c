@@ -76,7 +76,7 @@ static void test_html(void) {
     CHECK(strstr(out.data, "│ 引用内容") != NULL, "quote prefix");
     CHECK(strstr(out.data, ":)") != NULL, "smiley -> :)");
     CHECK(strstr(out.data, ":D") != NULL, "smiley -> :D");
-    CHECK(strstr(out.data, "〔图片〕") != NULL, "attachment placeholder");
+    CHECK(strstr(out.data, "") != NULL, "attachment URL placeholder (-wrapped)");
     CHECK(strstr(out.data, "alert") == NULL, "script content dropped");
     CHECK(strstr(out.data, "尾部 文字") != NULL, "nbsp -> space");
     str_free(&out);
@@ -157,7 +157,7 @@ static void test_discuz(void) {
               "post body keeps Chinese text");
         CHECK(n > 0 && strstr(thread.posts[0].body.data, ":)") != NULL,
               "post body contains smiley code");
-        CHECK(n > 0 && strstr(thread.posts[0].body.data, "〔图片〕") != NULL,
+        CHECK(n > 0 && strstr(thread.posts[0].body.data, "") != NULL,
               "post body contains image placeholder");
         CHECK(n > 0 && thread.posts[0].floor == 1, "floor number parsed");
         CHECK(n > 0 && strstr(thread.posts[0].author, "墨水瓶") != NULL,
@@ -232,7 +232,7 @@ static void test_layout(void) {
     }
     thread.nposts = 3;
     Book b; book_init(&b, &g);
-    book_from_thread(&b, &g, &thread, 0);
+    book_from_thread(&b, &g, &thread, 0, NULL, 0);
     CHECK(b.n > g.rows, "long thread spans multiple lines");
     CHECK(b.np >= 2, "long thread spans multiple pages");
     int expected = (b.n + g.rows - 1) / g.rows;

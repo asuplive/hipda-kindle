@@ -82,11 +82,6 @@ int net_init(const Config *c) {
 }
 void net_close(void) { unlink(g_tmp); }
 
-static uint64_t fnv1a(const char *s) {
-    uint64_t h = 1469598103934665603ULL;
-    for (; *s; s++) { h ^= (unsigned char)*s; h *= 1099511628211ULL; }
-    return h;
-}
 static void cache_path(const Config *c, const char *url, char *out, size_t cap) {
     uint64_t h = fnv1a(url);
     snprintf(out, cap, "%s/%08X%08X.html", c->cache_dir,
@@ -126,6 +121,44 @@ static int curl_raw(const Config *c, const char *url, const char *post) {
     int st = 0;
     if (waitpid(pid, &st, 0) < 0) return -1;
     return (WIFEXITED(st) && WEXITSTATUS(st) == 0) ? 0 : -1;
+}
+
+/* Download a binary file (forum image) straight to out_path, refusing files
+ * larger than max_bytes (curl --max-filesize) so a huge attachment cannot
+ * fill the disk. Cookies are sent so login-gated attachments work. */
+int net_fetch_file(const Config *c, const char *url, const char *out_path,
+                   size_t max_bytes) {
+    int tmo = c->timeout > 0 ? c->timeout : 20;
+    char tmo_long[32];
+    snprintf(tmo_long, sizeof(tmo_long), "--max-time=%d", tmo * 2);
+    char tmo_short[16];
+    snprintf(tmo_short, sizeof(tmo_short), "%d", tmo * 2);
+    char limit[32];
+    snprintf(limit, sizeof(limit), "%llu", (unsigned long long)max_bytes);
+
+    char *argv[40];
+    int n = 0;
+    argv[n++] = (char *)g_curl_cmd;
+    argv[n++] = (char *)"-sS";
+    argv[n++] = (char *)"-L";
+    argv[n++] = (char *)"-k";
+    if (g_tmo_style == 1)      argv[n++] = tmo_long;
+    else if (g_tmo_style == 2) { argv[n++] = (char *)"-m"; argv[n++] = tmo_short; }
+    argv[n++] = (char *)"--max-filesize";
+    argv[n++] = limit;
+    argv[n++] = (char *)"-A"; argv[n++] = (char *)c->user_agent;
+    argv[n++] = (char *)"-b"; argv[n++] = (char *)c->cookie_file;
+    argv[n++] = (char *)"-o"; argv[n++] = (char *)out_path;
+    argv[n++] = (char *)url;
+    argv[n] = NULL;
+    pid_t pid = fork();
+    if (pid < 0) return -1;
+    if (pid == 0) { execvp(argv[0], argv); _exit(127); }
+    int st = 0;
+    if (waitpid(pid, &st, 0) < 0) return -1;
+    if (!(WIFEXITED(st) && WEXITSTATUS(st) == 0)) return -1;
+    /* curl exits 0 even for an HTML error page; a zero-byte file is failure */
+    return file_exists(out_path) ? 0 : -1;
 }
 
 static int decode_raw(const Config *c, const char *url, Str *out_utf8) {

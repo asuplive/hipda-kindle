@@ -41,5 +41,6 @@ int ui_present_region(const unsigned char *px, int full_w, int x, int y,
     (void)px; (void)full_w; (void)x; (void)y; (void)w; (void)h; (void)flashing;
     return 0;
 }
-void ui_set_fast_wfm(int on) { (void)on; }
+void ui_set_refresh_mode(int mode) { (void)mode; }
+void ui_set_rotation(int deg) { (void)deg; }
 void ui_close(void) { log_msg("preview: wrote %d pages to %s/", g_n, g_dir); }

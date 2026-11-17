@@ -1,4 +1,5 @@
 #include "render.h"
+#include "layout.h"
 #include "gbk.h"
 #include "util.h"
 
@@ -162,6 +163,65 @@ void render_page(Canvas *c, Font *font, const Geometry *g, const Book *b,
         if (l->kind == L_SEP) {
             canvas_hline(c, mx, y + g->cell_h / 2, right - mx,
                          ink(theme, 0xC0), scale > 1 ? 1 : 1);
+        } else if (l->kind == L_KEYS) {
+            /* keyboard row: 10 boxed keys, 3 cells apart, pressed row inverts */
+            int press = (i == press_line);
+            for (int k = 0; k < 10; k++) {
+                int kx = mx + k * 3 * g->cell_w + 2;
+                int kw = 3 * g->cell_w - 4;
+                int kh = g->cell_h + 2 * scale;
+                if (press) {
+                    canvas_rect(c, kx, y - scale, kw, kh, ink(theme, INK_BLACK));
+                    font_draw_text(font, c, kx + kw / 2 - g->cell_w / 2, y,
+                                   l->text ? l->text + k * KEY_CHARS : "",
+                                   scale, ink(theme, INK_WHITE), 1);
+                } else {
+                    canvas_frame(c, kx, y - scale, kw, kh,
+                                 ink(theme, INK_BLACK), scale > 1 ? 2 : 1);
+                    font_draw_text(font, c, kx + kw / 2 - g->cell_w / 2, y,
+                                   l->text ? l->text + k * KEY_CHARS : "",
+                                   scale, ink(theme, INK_BLACK), 1);
+                }
+            }
+        } else if (l->kind == L_CTRL) {
+            /* control row: 6 boxed buttons, 6 cells apart. Labels are baked
+             * into the text at fixed 6-char slots so hit-test matches paint. */
+            static const char *const ctrl_labels[6] = {
+                "Sh", "Pg", "空格", "退格", "回车", "取消"
+            };
+            int press = (i == press_line);
+            for (int k = 0; k < 6; k++) {
+                int kx = mx + k * 6 * g->cell_w + 2;
+                int kw = 6 * g->cell_w - 4;
+                int kh = g->cell_h + 2 * scale;
+                int tw = font_text_width(font, ctrl_labels[k], scale);
+                if (press) {
+                    canvas_rect(c, kx, y - scale, kw, kh, ink(theme, INK_BLACK));
+                    font_draw_text(font, c, kx + (kw - tw) / 2, y, ctrl_labels[k],
+                                   scale, ink(theme, INK_WHITE), 1);
+                } else {
+                    canvas_frame(c, kx, y - scale, kw, kh,
+                                 ink(theme, INK_BLACK), scale > 1 ? 2 : 1);
+                    font_draw_text(font, c, kx + (kw - tw) / 2, y, ctrl_labels[k],
+                                   scale, ink(theme, INK_BLACK), 0);
+                }
+            }
+        } else if (l->kind == L_BTN) {
+            /* wide centred button (登 录): frame + label, inverts on press */
+            int tw = font_text_width(font, l->text ? l->text : "", scale);
+            int bw = tw + 10 * scale;
+            int bh = g->cell_h + 4 * scale;
+            int bx = (g->w - bw) / 2;
+            if (i == press_line) {
+                canvas_rect(c, bx, y - 2 * scale, bw, bh, ink(theme, INK_BLACK));
+                font_draw_text(font, c, bx + 5 * scale, y, l->text, scale,
+                               ink(theme, INK_WHITE), 1);
+            } else {
+                canvas_frame(c, bx, y - 2 * scale, bw, bh,
+                             ink(theme, INK_BLACK), scale > 1 ? 2 : 1);
+                font_draw_text(font, c, bx + 5 * scale, y, l->text, scale,
+                               ink(theme, INK_BLACK), 1);
+            }
         } else if (i == press_line && l->text && l->text[0]) {
             /* finger is on this row right now: invert it so the touch is
              * visibly acknowledged even on a slow e-ink screen */
@@ -169,7 +229,7 @@ void render_page(Canvas *c, Font *font, const Geometry *g, const Book *b,
                         g->cell_h + 2 * scale, ink(theme, INK_BLACK));
             font_draw_text(font, c, x, y, l->text, scale,
                            ink(theme, INK_WHITE), 1);
-        } else if (l->kind == L_ITEM && i == sel_line) {
+        } else if ((l->kind == L_ITEM || l->kind == L_TITLE) && i == sel_line) {
             canvas_rect(c, mx - scale, y - scale, right - mx + 2 * scale,
                         g->cell_h + 2 * scale, ink(theme, INK_BLACK));
             font_draw_text(font, c, x, y, l->text, scale,
@@ -177,7 +237,8 @@ void render_page(Canvas *c, Font *font, const Geometry *g, const Book *b,
         } else {
             uint8_t col = ink(theme, INK_BLACK);
             int bold = 0;
-            if (l->kind == L_META || l->kind == L_NOTE) col = ink(theme, INK_GRAY);
+            if (l->kind == L_META || l->kind == L_NOTE || l->kind == L_IMGPH)
+                col = ink(theme, INK_GRAY);
             if (l->kind == L_TITLE) bold = 1;
             font_draw_text(font, c, x, y, l->text, scale, col, bold);
         }

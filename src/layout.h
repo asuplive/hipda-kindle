@@ -14,8 +14,20 @@ typedef enum {
     L_BODY,        /* post text */
     L_ITEM,        /* selectable list row (forum / topic) */
     L_SEP,         /* thin rule between posts */
-    L_NOTE         /* "forum page 2" marker, hints */
+    L_NOTE,        /* "forum page 2" marker, hints */
+    L_KEYS,        /* on-screen keyboard: one row of 10 boxed keys */
+    L_CTRL,        /* keyboard control row: Sh/Pg/Space/Back/Enter/Cancel */
+    L_BTN,         /* wide centred button ("登 录") */
+    L_IMGPH        /* image placeholder row; item_id = URL hash */
 } LineKind;
+
+/* Keyboard geometry contract shared by painter and hit-test:
+ * an L_KEYS row holds 10 keys, each in a KEY_CHARS-char slot ("x  ");
+ * an L_CTRL row paints 6 buttons, each 6 cells wide. */
+#define KEY_CHARS 3
+#define KEY_COLS 10
+#define KEY_CTRL_COLS 6
+#define KEY_CTRL_STRIDE 6
 
 typedef struct {
     LineKind kind;
@@ -56,7 +68,7 @@ int   book_from_forums(Book *b, const Geometry *g, const Config *cfg);
 int   book_from_topics(Book *b, const Geometry *g, const TopicList *list,
                        const Forum *forum, int append);
 int   book_from_thread(Book *b, const Geometry *g, const ThreadPage *thread,
-                       int append);
+                       int append, Str *img_urls, int img_mode);
 
 /* Generic list screen: every item is a selectable L_ITEM whose item_id is
  * 1..n (the caller maps it back to an action). */

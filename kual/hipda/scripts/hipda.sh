@@ -30,10 +30,21 @@ echo "font  : $(ls -l ./fonts/unifont.bin 2>&1)" >> "$LOG"
 lipc-set-prop com.lab126.powerd preventScreenSaver 1 >>"$LOG" 2>&1 || \
   echo "note: lipc preventScreenSaver unavailable (non-fatal)" >> "$LOG"
 
+# Hide the system status bar (clock / wifi / battery), ZhihuReader-style.
+# Property name spelled "visability" — that is the real (mis-spelled) Kindle
+# property. Both variants are attempted; failures are non-fatal: worst case
+# the bar stays visible and everything still works.
+lipc-set-prop -i com.lab126.winmgr winmgr_statusbar_visability false >>"$LOG" 2>&1 || \
+lipc-set-prop -i com.lab126.winmgr winmgr_statusbar_visability 0 >>"$LOG" 2>&1 || \
+  echo "note: could not hide status bar (non-fatal)" >> "$LOG"
+
 echo "launching: ./bin/hipda $EXTRA" >> "$LOG"
 ./bin/hipda --config "$ROOT/config.ini" --font "$ROOT/fonts/unifont.bin" $EXTRA >> "$LOG" 2>&1
 RC=$?
 echo "=== hipda exit $RC  $(date) ===" >> "$LOG"
 
+# Restore the status bar and hand the screen back to the system.
+lipc-set-prop -i com.lab126.winmgr winmgr_statusbar_visability true >>"$LOG" 2>&1 || \
+lipc-set-prop -i com.lab126.winmgr winmgr_statusbar_visability 1 >>"$LOG" 2>&1
 lipc-set-prop com.lab126.powerd preventScreenSaver 0 >>"$LOG" 2>&1
 exit $RC

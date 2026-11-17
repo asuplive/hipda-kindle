@@ -11,17 +11,73 @@
 
 static int         g_fbfd = FBFD_AUTO;
 static FBInkConfig g_cfg;
-static int         g_fast_wfm = 1;
+static int         g_refresh_mode = 3;   /* see ui.h: 0 all / 1 partial / 2 regal / 3 hybrid */
+static int         g_rotation = 0;       /* 0/90/180/270, content rotation CW */
+static unsigned char *g_rot_buf = NULL;
+static int         g_rot_w = 0, g_rot_h = 0, g_rot_lw = 0, g_rot_lh = 0;
 
-void ui_set_fast_wfm(int on) { g_fast_wfm = on ? 1 : 0; }
+void ui_set_refresh_mode(int mode) {
+    if (mode >= 0 && mode <= 3) g_refresh_mode = mode;
+}
 
-/* Per-refresh waveform. DU is ~260ms and pure black & white, which suits our
- * 1-bit bitmap font; GC16 costs ~450ms but wipes ghosting, so it is reserved
- * for the periodic full flash. */
+void ui_set_rotation(int deg) {
+    if (deg == 0 || deg == 90 || deg == 180 || deg == 270) g_rotation = deg;
+}
+
+/* Rotate the logical canvas (what the user sees) into panel orientation.
+ * Mapping (content rotated clockwise by deg):
+ *   90:  device(dx,dy) = logical(lx=dy, ly=lh-1-dx)
+ *   180: device(dx,dy) = logical(lw-1-dx, lh-1-dy)
+ *   270: device(dx,dy) = logical(lw-1-dy, lx=dx)
+ * The input_touch side inverts the same mapping. */
+static const unsigned char *rotated(const unsigned char *src, int lw, int lh,
+                                    int *dw, int *dh) {
+    if (g_rotation == 0) { *dw = lw; *dh = lh; return src; }
+    int dW = (g_rotation == 90 || g_rotation == 270) ? lh : lw;
+    int dH = (g_rotation == 90 || g_rotation == 270) ? lw : lh;
+    if (!g_rot_buf || g_rot_w != dW || g_rot_h != dH ||
+        g_rot_lw != lw || g_rot_lh != lh) {
+        free(g_rot_buf);
+        g_rot_buf = malloc((size_t)dW * (size_t)dH);
+        if (!g_rot_buf) { *dw = lw; *dh = lh; return src; }   /* fall back */
+        g_rot_w = dW; g_rot_h = dH; g_rot_lw = lw; g_rot_lh = lh;
+    }
+    for (int dy = 0; dy < dH; dy++) {
+        unsigned char *drow = g_rot_buf + (size_t)dy * dW;
+        for (int dx = 0; dx < dW; dx++) {
+            int sx, sy;
+            if (g_rotation == 90)       { sx = dy;          sy = lh - 1 - dx; }
+            else if (g_rotation == 180) { sx = lw - 1 - dx; sy = lh - 1 - dy; }
+            else                        { sx = lw - 1 - dy; sy = dx; }
+            drow[dx] = src[(size_t)sy * lw + sx];
+        }
+    }
+    *dw = dW; *dh = dH;
+    return g_rot_buf;
+}
+
+/* Map a logical region to panel coordinates (bounding box after rotation). */
+static void rotated_region(int lw, int lh, int x, int y, int w, int h,
+                           int *rx, int *ry, int *rw, int *rh) {
+    if (g_rotation == 0) { *rx = x; *ry = y; *rw = w; *rh = h; return; }
+    if (g_rotation == 90)       { *rx = y;        *ry = lh - x - w; *rw = h; *rh = w; }
+    else if (g_rotation == 180) { *rx = lw - x - w; *ry = lh - y - h; *rw = w; *rh = h; }
+    else                        { *rx = lw - y - h; *ry = x;        *rw = h; *rh = w; }
+}
+
+/* Per-refresh waveform, four user-selectable modes:
+ *   0 = full refresh every time (WFM_GC16 + flash — slowest, zero ghosting)
+ *   1 = partial refresh every time (WFM_DU — fastest, ghosting builds up)
+ *   2 = Regal (WFM_REAGL — Kindle-only mode, low flash, decent quality)
+ *   3 = hybrid: DU per page + a GC16 full flash every N pages (default)      */
 static uint32_t pick_wfm(int flashing, FBInkConfig *cfg) {
     cfg->is_flashing = false;
-    if (flashing) return WFM_GC16;
-    return g_fast_wfm ? WFM_DU : WFM_AUTO;
+    switch (g_refresh_mode) {
+        case 0:  cfg->is_flashing = true;  return WFM_GC16;
+        case 1:  return WFM_DU;
+        case 2:  return WFM_REAGL;
+        default: return flashing ? WFM_GC16 : WFM_DU;
+    }
 }
 
 int ui_init(UiInfo *out) {
@@ -54,11 +110,13 @@ int ui_init(UiInfo *out) {
 }
 
 int ui_present(const unsigned char *px, int w, int h, int flashing) {
+    int dw, dh;
+    const unsigned char *out = rotated(px, w, h, &dw, &dh);
     FBInkConfig cfg = g_cfg;
     cfg.wfm_mode = pick_wfm(flashing, &cfg);
     cfg.no_refresh = false;
     cfg.is_cleared = false;
-    int r = fbink_print_raw_data(g_fbfd, px, w, h, (size_t)w * (size_t)h, 0, 0, &cfg);
+    int r = fbink_print_raw_data(g_fbfd, out, dw, dh, (size_t)dw * (size_t)dh, 0, 0, &cfg);
     if (r < 0) log_msg("fbink_print_raw_data failed: %d", r);
     return r < 0 ? -1 : 0;
 }
@@ -70,29 +128,55 @@ int ui_present_region(const unsigned char *px, int full_w, int x, int y,
     if (y < 0) { h += y; y = 0; }
     if (w <= 0 || h <= 0) return 0;
 
+    /* Rotated panels: rotate the whole logical page once, then crop the
+     * region out of the panel-oriented copy. The rotated copy is cached, so
+     * back-to-back row feedback (press highlight, selection move) skips the
+     * rotation entirely. */
+    int lw = full_w, lh = (full_w > 0) ? g_rot_lh : 0;
+    /* recover logical height: the caller only passes full_w, so derive it
+     * from the panel size we know */
+    FBInkState st;
+    memset(&st, 0, sizeof(st));
+    fbink_get_state(&g_cfg, &st);
+    int sw = (int)(st.view_width ? st.view_width : st.screen_width);
+    int sh = (int)(st.view_height ? st.view_height : st.screen_height);
+    if (g_rotation == 90 || g_rotation == 270) { lh = sw; lw = sh; }
+    else { lw = sw; lh = sh; }
+
+    int dw, dh;
+    const unsigned char *out = rotated(px, lw, lh, &dw, &dh);
+
+    int rx, ry, rw, rh;
+    rotated_region(lw, lh, x, y, w, h, &rx, &ry, &rw, &rh);
+    if (rx < 0) { rw += rx; rx = 0; }
+    if (ry < 0) { rh += ry; ry = 0; }
+    if (rx + rw > dw) rw = dw - rx;
+    if (ry + rh > dh) rh = dh - ry;
+    if (rw <= 0 || rh <= 0) return 0;
+
     /* Reuse one scratch buffer: a full-page refresh builds a 2MB temp buffer
      * every time, which is exactly the kind of churn that made e-ink feel
      * frozen. A one-row region is a few dozen KB and reuses the allocation. */
     static unsigned char *buf = NULL;
     static size_t cap = 0;
-    size_t need = (size_t)w * (size_t)h;
+    size_t need = (size_t)rw * (size_t)rh;
     if (need > cap) {
         unsigned char *nb = (unsigned char *)realloc(buf, need);
         if (!nb) { log_msg("region: out of memory (%zu bytes)", need); return -1; }
         buf = nb;
         cap = need;
     }
-    for (int row = 0; row < h; row++)
-        memcpy(buf + (size_t)row * (size_t)w,
-               px + (size_t)(y + row) * (size_t)full_w + (size_t)x,
-               (size_t)w);
+    for (int row = 0; row < rh; row++)
+        memcpy(buf + (size_t)row * (size_t)rw,
+               out + (size_t)(ry + row) * (size_t)dw + (size_t)rx,
+               (size_t)rw);
 
     FBInkConfig cfg = g_cfg;
     cfg.wfm_mode = pick_wfm(flashing, &cfg);
     cfg.no_refresh = false;
     cfg.is_cleared = false;
-    int r = fbink_print_raw_data(g_fbfd, buf, w, h, need, (short)x, (short)y, &cfg);
-    if (r < 0) log_msg("region present failed: %d (x=%d y=%d w=%d h=%d)", r, x, y, w, h);
+    int r = fbink_print_raw_data(g_fbfd, buf, rw, rh, need, (short)rx, (short)ry, &cfg);
+    if (r < 0) log_msg("region present failed: %d (x=%d y=%d w=%d h=%d)", r, rx, ry, rw, rh);
     return r < 0 ? -1 : 0;
 }
 

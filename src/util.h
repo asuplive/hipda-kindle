@@ -38,6 +38,8 @@ int   parse_int(const char *s, int fallback);
 
 /* Query-param extractor: find "name=" in a URL and copy its raw value. */
 int   url_param(const char *url, const char *name, char *out, size_t cap);
+/* 64-bit FNV-1a of a string (used for cache filenames and image ids). */
+unsigned long long fnv1a(const char *s);
 
 void  log_msg(const char *fmt, ...);
 void  log_set_file(const char *path);

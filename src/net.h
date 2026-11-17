@@ -21,6 +21,10 @@ void net_url_login(char *out, size_t cap, const Config *c);
  * used when refresh == 0; offline mode only reads the cache. */
 int  net_fetch(const Config *c, const char *url, Str *out_utf8, int refresh);
 
+/* Download a binary file (image) to out_path with a hard size cap. 0 = OK. */
+int  net_fetch_file(const Config *c, const char *url, const char *out_path,
+                    size_t max_bytes);
+
 /* logging.php formhash -> POST (MD5 password) -> cdb_auth cookie. */
 int  net_login(const Config *c);
 int  net_has_auth_cookie(const Config *c);

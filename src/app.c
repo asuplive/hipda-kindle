@@ -8,6 +8,7 @@
 #include "layout.h"
 #include "md5.h"
 #include "net.h"
+#include "image.h"
 #include "render.h"
 #include "ui.h"
 #include "util.h"
@@ -24,7 +25,8 @@
 #endif
 
 typedef enum { V_FORUMS, V_TOPICS, V_THREAD, V_MESSAGE,
-               V_MENU, V_TEXT, V_LOGIN, V_SETTINGS, V_CALIB } View;
+               V_MENU, V_TEXT, V_LOGIN, V_SETTINGS, V_CALIB,
+               V_FAVLIST } View;
 
 /* The "Hi" menu. Order matters: item_id == index + 1. */
 static const char *kMenuItems[] = {
@@ -49,7 +51,7 @@ static const char *kMenuItems[] = {
 #define MENU_THEME      10
 #define MENU_QUIT       11
 
-#define SETTINGS_N 8
+#define SETTINGS_N 10
 
 /* On-screen keyboard, three pages: lower-case, upper-case, digits/symbols.
  * Each key takes 3 cells (character + 2 blanks) so the keys are far enough
@@ -71,11 +73,8 @@ static const char *kKeyRows[] = {
 };
 #define KEY_ROWS_PER_PAGE 3
 #define KEY_PAGES ((int)(sizeof(kKeyRows) / sizeof(kKeyRows[0]) / KEY_ROWS_PER_PAGE))
-#define KEY_STRIDE 3
 #define KEY_CTRL_ID 100
-#define KEY_CTRL_STRIDE 4
-/* control row: 6 four-cell buttons; order matters (see input_view_action) */
-#define KEY_CTRL_ROW "[Sh][Pg][Sp][Bk][Ok][Xx]"
+/* control row buttons, left to right (6 buttons, 6 cells each — see layout.h) */
 #define KEY_CTRL_SH 0
 #define KEY_CTRL_PG 1
 #define KEY_CTRL_SP 2
@@ -109,6 +108,7 @@ typedef struct {
     int      page_index;
     int      sel_line;
     int      cur_fid, cur_tid;
+    int      in_fav;                   /* thread was opened from the favourites list */
     int      topic_page, topic_last;
     int      thread_page, thread_last;
     int      since_flash;
@@ -126,6 +126,7 @@ typedef struct {
     char     login_user[HIPDA_SHORT_LEN];
     char     login_pass[128];
     char     search_term[128];
+    Str      img_urls;                 /* URLs of the current thread's images, in order */
     char     msg_title[HIPDA_NAME_LEN];
     char     msg_body[1024];
 #ifdef PC_BUILD
@@ -262,6 +263,7 @@ static const char *view_name(View v) {
         case V_TEXT:     return "text";
         case V_LOGIN:    return "login";
         case V_SETTINGS: return "settings";
+        case V_FAVLIST:  return "favlist";
         default:         return "message";
     }
 }
@@ -612,7 +614,9 @@ static int show_thread(App *a, int tid, int page, int append, int refresh) {
         app_message(a, "没有解析到正文", "可能需要登录，或论坛模板已改版。\n用 --dump 抓一页对照 src/discuz.c 的规则表。");
         return -1;
     }
-    book_from_thread(&a->book, &a->geo, &thread, append);
+    if (!append) str_clear(&a->img_urls);   /* fresh thread: restart the list */
+    book_from_thread(&a->book, &a->geo, &thread, append,
+                     &a->img_urls, a->cfg.img_mode);
     a->cur_tid = tid;
     a->thread_page = page;
     a->thread_last = thread.last_page;
@@ -709,12 +713,42 @@ static void toggle_theme(App *a) {
     }
 }
 
+/* Rotation: the UI always draws on a LOGICAL canvas (geo.w×geo.h); 90/270
+ * swap the panel's width/height. Rebuild geometry accordingly. */
+static void apply_rotation(App *a) {
+    int swap = (a->cfg.rotation == 90 || a->cfg.rotation == 270);
+    int lw = swap ? a->ui.h : a->ui.w;
+    int lh = swap ? a->ui.w : a->ui.h;
+    geometry_compute(&a->geo, lw, lh, a->ui.dpi, a->cfg.font_scale);
+    ui_set_rotation(a->cfg.rotation);
+    log_msg("rotation %d -> logical %dx%d", a->cfg.rotation, lw, lh);
+}
+
+/* Rebuild the drawing canvas after a geometry change (font size, rotation). */
+static int canvas_rebuild(App *a) {
+    canvas_free(&a->canvas);
+    return canvas_init(&a->canvas, a->geo.w, a->geo.h);
+}
+
+/* Touch panel reports PANEL coordinates; invert the rotation mapping so taps
+ * land on the logical (rotated-content) coordinates the UI works in.
+ * Exact inverses of the pixel mapping in ui_fbink.c::rotated(). */
+static void rotate_touch(App *a, int *x, int *y) {
+    int deg = a->cfg.rotation;
+    if (deg == 0) return;
+    int lw = a->geo.w, lh = a->geo.h;
+    if (deg == 90)       { int lx = *y,        ly = lh - 1 - *x; *x = lx; *y = ly; }
+    else if (deg == 180) { *x = lw - 1 - *x;   *y = lh - 1 - *y; }
+    else                 { int lx = lw - 1 - *y, ly = *x; *x = lx; *y = ly; }
+}
+
 static void apply_font_scale(App *a, int scale) {
     a->cfg.font_scale = scale;
     config_save(&a->cfg);
-    geometry_compute(&a->geo, a->ui.w, a->ui.h, a->ui.dpi, a->cfg.font_scale);
+    apply_rotation(a);   /* re-derives geometry for the current rotation */
     /* snapshots were wrapped for the old column width: they must be dropped */
     snap_invalidate_all(a);
+    canvas_rebuild(a);
     log_msg("font_scale -> %d (cols=%d rows=%d)", scale, a->geo.cols, a->geo.rows);
 }
 
@@ -848,13 +882,63 @@ static void show_fav_cache(App *a) {
     a->view_before_msg = V_MENU;
 }
 
+/* The favourites list, ZhihuReader-style: one line per saved thread, tap to
+ * read it in full (offline cache is used whenever present). */
+static void show_fav_list(App *a) {
+    a->in_fav = 0;
+    const char *base = "my.php?item=favorites&type=thread";
+    char url[HIPDA_URL_LEN];
+    snprintf(url, sizeof(url), "%s%s%s", a->cfg.forum_server, HIPDA_FORUM_PATH, base);
+
+    app_message(a, "我的收藏", "正在读取收藏列表…\n点屏幕可中止。");
+    Str html; str_init(&html);
+    int fr = fetch_or_message(a, url, &html, 1);
+    if (fr) {
+        str_free(&html);
+        if (fr == -2) resume_after_cancel(a);
+        return;
+    }
+    TopicList fav;
+    int n = discuz_parse_favorites(html.data, &fav);
+    str_free(&html);
+    if (n <= 0) {
+        app_message(a, "收藏为空",
+                    "没有解析到收藏帖子。\n（需要登录，且至少收藏过一个帖子）");
+        a->view_before_msg = V_MENU;
+        return;
+    }
+
+    book_reset(&a->book);
+    str_copy(a->book.title, sizeof(a->book.title), "我的收藏");
+    a->book.subtitle[0] = 0;
+    a->book.fid = 0; a->book.tid = 0;
+    char note[64];
+    snprintf(note, sizeof(note), "共 %d 篇 · 点条目阅读（已缓存离线可看）", n);
+    book_wrap_text(&a->book, &a->geo, L_NOTE, note, 0, 0, 1);
+    book_add_line(&a->book, L_BLANK, "", 0, 0, 1);
+    for (int i = 0; i < n; i++) {
+        char row[HIPDA_NAME_LEN];
+        const char *t = fav.v[i].title[0] ? fav.v[i].title : "（无标题）";
+        snprintf(row, sizeof(row), "· %s", t);
+        book_wrap_text(&a->book, &a->geo, L_ITEM, row, 0, fav.v[i].tid, 1);
+        book_add_line(&a->book, L_BLANK, "", 0, 0, 1);
+    }
+    book_finalize(&a->book, &a->geo);
+    topic_list_free(&fav);
+
+    a->view = V_FAVLIST;
+    a->page_index = 0; a->sel_line = -1;
+    a->cur_fid = 0; a->cur_tid = 0;
+    app_draw(a, NULL);
+}
+
 static void menu_action(App *a, int idx) {
     switch (idx) {
         case 1: show_forums(a); break;
         case 2: show_search(a); break;
         case 3: show_url_text(a, "我的帖子", "my.php?item=threads"); break;
         case 4: show_url_text(a, "我的回复", "my.php?item=posts"); break;
-        case MENU_FAVOURITES: show_url_text(a, "我的收藏", "my.php?item=favorites&type=thread"); break;
+        case MENU_FAVOURITES: show_fav_list(a); break;
         case MENU_FAV_CACHE:  show_fav_cache(a); break;
         case MENU_PM:         show_url_text(a, "短消息", "pm.php"); break;
         case MENU_NOTICE:     show_url_text(a, "帖子消息", "notice.php"); break;
@@ -925,20 +1009,24 @@ static void build_input_book(App *a, const char *title, const char *field0,
     book_wrap_text(&a->book, &a->geo, editing == 0 ? L_ITEM : L_META, l0, 0, 1, 1);
     book_add_line(&a->book, L_BLANK, "", 0, 0, 1);
     book_wrap_text(&a->book, &a->geo, editing == 1 ? L_ITEM : L_META, l1, 0, 2, 1);
+    /* the login button sits directly under the two fields; Enter ([回车] on
+     * the control row) does the same thing */
+    book_add_line(&a->book, L_BLANK, "", 0, 0, 1);
+    book_wrap_text(&a->book, &a->geo, L_BTN, "登  录", 0, 91, 1);
     book_add_line(&a->book, L_BLANK, "", 0, 0, 1);
     book_wrap_text(&a->book, &a->geo, L_NOTE,
-                   "点 [Sh] 切换大小写 · [Pg] 切数字符号 · [Sp] 空格", 0, 0, 1);
+                   "[Sh]大小写 [Pg]数字符号 [回车]=登录", 0, 0, 1);
     if (roomy) book_add_line(&a->book, L_BLANK, "", 0, 0, 1);
 
     /* current keyboard page */
     int base = a->kb_page * KEY_ROWS_PER_PAGE;
     for (int r = 0; r < KEY_ROWS_PER_PAGE; r++) {
-        book_wrap_text(&a->book, &a->geo, L_TITLE, kKeyRows[base + r], 0, 0, 1);
+        book_wrap_text(&a->book, &a->geo, L_KEYS, kKeyRows[base + r], 0, 0, 1);
         if (roomy) book_add_line(&a->book, L_BLANK, "", 0, 0, 1);
     }
-    /* control row: Shift / Page / Space / Backspace / OK / Cancel */
+    /* control row: Shift / Page / Space / Backspace / Enter / Cancel */
     book_add_line(&a->book, L_BLANK, "", 0, 0, 1);
-    book_wrap_text(&a->book, &a->geo, L_ITEM, KEY_CTRL_ROW, 0, KEY_CTRL_ID, 1);
+    book_wrap_text(&a->book, &a->geo, L_CTRL, "", 0, KEY_CTRL_ID, 1);
     book_finalize(&a->book, &a->geo);
 }
 
@@ -965,15 +1053,23 @@ static void build_settings_book(App *a) {
     snprintf(buf[0], HIPDA_NAME_LEN, "字号：%s", scale_txt);
     snprintf(buf[1], HIPDA_NAME_LEN, "主题：%s",
              a->cfg.theme ? "黑底白字（夜间）" : "白底黑字（日间）");
-    snprintf(buf[2], HIPDA_NAME_LEN, "翻页刷屏：%s",
-             a->cfg.wfm_fast ? "快速（无闪，约 260ms）" : "清晰（约 450ms）");
+    static const char *const rm_names[4] = {
+        "全刷（最清晰，最慢）", "局部刷（最快，有残影）",
+        "Regal（Kindle 特有）", "智能（局部刷N页+全刷）"
+    };
+    snprintf(buf[2], HIPDA_NAME_LEN, "刷屏模式：%s",
+             rm_names[a->cfg.refresh_mode & 3]);
     snprintf(buf[3], HIPDA_NAME_LEN, "每几页全刷：%d", a->cfg.full_refresh_every);
-    snprintf(buf[4], HIPDA_NAME_LEN, "登录账号：%s",
+    snprintf(buf[4], HIPDA_NAME_LEN, "屏幕旋转：%d°%s",
+             a->cfg.rotation, a->cfg.rotation == 0 ? "（默认）" : "");
+    snprintf(buf[5], HIPDA_NAME_LEN, "图片显示：%s",
+             a->cfg.img_mode ? "点按显示（自动缓存）" : "不显示");
+    snprintf(buf[6], HIPDA_NAME_LEN, "登录账号：%s",
              a->cfg.username[0] ? a->cfg.username : "（未登录）");
-    snprintf(buf[5], HIPDA_NAME_LEN, "触摸校准（swap=%d 镜像=%d/%d）",
+    snprintf(buf[7], HIPDA_NAME_LEN, "触摸校准（swap=%d 镜像=%d/%d）",
              a->cfg.cal_swap, a->cfg.cal_flip_x, a->cfg.cal_flip_y);
-    str_copy(buf[6], HIPDA_NAME_LEN, "清理缓存（离线内容与已读页面）");
-    str_copy(buf[7], HIPDA_NAME_LEN, "返回");
+    str_copy(buf[8], HIPDA_NAME_LEN, "清理缓存（离线内容与已读页面）");
+    str_copy(buf[9], HIPDA_NAME_LEN, "返回");
     for (int i = 0; i < SETTINGS_N; i++) items[i] = buf[i];
     book_from_menu(&a->book, &a->geo, "设置", "点一行修改", items, SETTINGS_N);
 }
@@ -1141,7 +1237,7 @@ static void input_view_action(App *a, Action act, int line_index, int tap_x) {
 
     const Line *l = &a->book.lines[idx];
 
-    /* ---- control row: Shift / Page / Space / Backspace / OK / Cancel ---- */
+    /* ---- control row: Sh / Pg / 空格 / 退格 / 回车 / 取消 ---- */
     if (id == KEY_CTRL_ID) {
         int step = a->geo.cell_w * KEY_CTRL_STRIDE;
         if (step < 1) step = 1;
@@ -1167,7 +1263,7 @@ static void input_view_action(App *a, Action act, int line_index, int tap_x) {
                 input_backspace(a);
                 input_rebuild(a);
                 return;
-            case KEY_CTRL_OK:
+            case KEY_CTRL_OK:          /* Enter — same as tapping 登录 */
                 if (a->input_mode == 3) run_search(a); else do_login(a);
                 return;
             case KEY_CTRL_XX:
@@ -1182,18 +1278,104 @@ static void input_view_action(App *a, Action act, int line_index, int tap_x) {
     for (int r = 0; r < KEY_PAGES * KEY_ROWS_PER_PAGE; r++)
         if (l->text && !strcmp(l->text, kKeyRows[r])) { row = r; break; }
     if (row < 0) return;
-    int step = a->geo.cell_w * KEY_STRIDE;
+    int step = a->geo.cell_w * KEY_CHARS;
     if (step < 1) step = 1;
     int col = (tap_x - a->geo.margin_x) / step;
-    if (col < 0 || col > 9) return;
+    if (col < 0 || col >= KEY_COLS) return;
     const char *keys = kKeyRows[row];
     int len = (int)strlen(keys);
-    int pos = col * KEY_STRIDE;        /*每键 1 字符 + 2 空格 */
+    int pos = col * KEY_CHARS;         /*每键 1 字符 + 2 空格 */
     if (pos < 0 || pos >= len) return;
     char ch = keys[pos];
     if (ch == ' ') return;                 /* blank cell between keys */
     input_append(a, ch);
     input_rebuild(a);
+}
+
+/* ---- tap-to-view images -------------------------------------------------
+ * Placeholders in a thread carry the URL hash as item_id; the URL list lives
+ * in a.img_urls. Downloaded once into cache_dir/imgs/, decoded with
+ * stb_image, scaled to fit the screen, then shown full-screen; a tap returns
+ * to the thread. Cached files load instantly on the next tap. */
+static void img_open(App *a, int id) {
+    char url[HIPDA_URL_LEN] = {0};
+    const char *p = a->img_urls.data;
+    while (p && *p) {
+        const char *nl = strchr(p, '\n');
+        size_t n = nl ? (size_t)(nl - p) : strlen(p);
+        char cand[HIPDA_URL_LEN];
+        if (n >= sizeof(cand)) n = sizeof(cand) - 1;
+        memcpy(cand, p, n);
+        cand[n] = 0;
+        int h = (int)(fnv1a(cand) & 0x7FFFFFFF);
+        if (h == 0) h = 1;
+        if (h == id) { str_copy(url, sizeof(url), cand); break; }
+        p = nl ? nl + 1 : NULL;
+    }
+    if (!url[0]) { app_draw(a, "图片链接已失效，请刷新后再试"); return; }
+
+    /* relative paths: forum pages reference /data/attachment/... or the
+     * image host directly */
+    char full[HIPDA_URL_LEN];
+    if (!strncmp(url, "http://", 7) || !strncmp(url, "https://", 8)) {
+        str_copy(full, sizeof(full), url);
+    } else if (url[0] == '/') {
+        snprintf(full, sizeof(full), "%s%s", a->cfg.forum_server, url);
+    } else {
+        const char *host = a->cfg.image_host[0] ? a->cfg.image_host
+                                                : a->cfg.forum_server;
+        snprintf(full, sizeof(full), "%s/%s", host, url);
+    }
+
+    char dir[HIPDA_PATH_LEN];
+    snprintf(dir, sizeof(dir), "%s/imgs", a->cfg.cache_dir);
+    dir_ensure(dir);
+    char path[HIPDA_PATH_LEN];
+    snprintf(path, sizeof(path), "%s/imgs/%08llX.img", a->cfg.cache_dir,
+             fnv1a(full) & 0xFFFFFFFFULL);
+
+    if (!file_exists(path)) {
+        app_message(a, "下载图片", "正在下载图片…\n点屏幕可中止。");
+        if (net_fetch_file(&a->cfg, full, path, 10u * 1024 * 1024) != 0) {
+            unlink(path);
+            app_draw(a, "图片下载失败（网络或大小限制）");
+            return;
+        }
+    }
+
+    unsigned char *px = NULL;
+    int iw = 0, ih = 0;
+    int max_w = a->geo.w - 2 * a->geo.margin_x;
+    int max_h = a->geo.h - 2 * a->geo.margin_y - 2 * a->geo.line_h;
+    if (img_load_y8(path, max_w, max_h, &px, &iw, &ih) != 0) {
+        app_draw(a, "图片解码失败（格式不支持或文件损坏）");
+        return;
+    }
+
+    /* full-screen viewer on the shared canvas */
+    uint8_t bg = a->cfg.theme ? 0 : 255;
+    uint8_t fg = a->cfg.theme ? 255 : 0;
+    canvas_fill(&a->canvas, bg);
+    int ix = (a->geo.w - iw) / 2;
+    int iy = a->geo.margin_y + a->geo.line_h;
+    for (int row = 0; row < ih; row++)
+        memcpy(a->canvas.px + (size_t)(iy + row) * (size_t)a->canvas.w + (size_t)ix,
+               px + (size_t)row * (size_t)iw, (size_t)iw);
+    char hint[64];
+    snprintf(hint, sizeof(hint), "%dx%d · 点任意位置返回", iw, ih);
+    font_draw_text(&a->font, &a->canvas, a->geo.margin_x,
+                   a->geo.h - a->geo.margin_y - a->geo.line_h,
+                   hint, a->geo.scale, fg, 0);
+    ui_present(a->canvas.px, a->canvas.w, a->canvas.h, 1);
+    free(px);
+
+    InputEvent ev;
+    for (;;) {
+        if (input_read(&ev, 300000) > 0 &&
+            (ev.tap || ev.act == ACT_BACK || ev.act == ACT_MENU ||
+             ev.act == ACT_QUIT || ev.act == ACT_HOME)) break;
+    }
+    app_draw(a, NULL);          /* back to the thread page */
 }
 
 /* Delete only cached pages (*.html) inside cache_dir. Cookies and config are
@@ -1231,8 +1413,8 @@ static void settings_action(App *a, int line_index) {
         }
         case 2: toggle_theme(a); break;
         case 3:
-            a->cfg.wfm_fast = a->cfg.wfm_fast ? 0 : 1;
-            ui_set_fast_wfm(a->cfg.wfm_fast);
+            a->cfg.refresh_mode = (a->cfg.refresh_mode + 1) % 4;
+            ui_set_refresh_mode(a->cfg.refresh_mode);
             config_save(&a->cfg);
             build_settings_book(a);
             app_draw(a, NULL);
@@ -1244,9 +1426,29 @@ static void settings_action(App *a, int line_index) {
             build_settings_book(a);
             app_draw(a, NULL);
             break;
-        case 5: show_login(a); break;
-        case 6: show_calib(a); break;
-        case 7: {
+        case 5: {
+            /* rotation: 0 -> 90 -> 180 -> 270 -> 0, rebuild everything that
+             * depends on geometry (canvas, snapshots, selection) */
+            a->cfg.rotation = (a->cfg.rotation + 90) % 360;
+            apply_rotation(a);
+            snap_invalidate_all(a);
+            canvas_rebuild(a);
+            a->sel_line = -1; a->page_index = 0;
+            config_save(&a->cfg);
+            build_settings_book(a);
+            app_draw(a, NULL);
+            break;
+        }
+        case 6:
+            a->cfg.img_mode = a->cfg.img_mode ? 0 : 1;
+            config_save(&a->cfg);
+            snap_invalidate_all(a);   /* placeholders re-render per mode */
+            build_settings_book(a);
+            app_draw(a, NULL);
+            break;
+        case 7: show_login(a); break;
+        case 8: show_calib(a); break;
+        case 9: {
             int n = cache_clear(a->cfg.cache_dir);
             snap_invalidate_all(a);
             log_msg("cache: cleared %d file(s) from %s", n, a->cfg.cache_dir);
@@ -1260,7 +1462,7 @@ static void settings_action(App *a, int line_index) {
             a->view_before_msg = V_SETTINGS;
             break;
         }
-        case 8: show_menu_view(a); break;
+        case 10: show_menu_view(a); break;
         default: break;
     }
 }
@@ -1293,15 +1495,18 @@ static void turn_prev(App *a) {
     else app_draw(a, "已经是第一页");
 }
 
-/* Resolve a tapped line to the closest selectable row. In list views a forum
- * block is "name" (item) + "版块 N" (meta), so tapping the description line
- * should still open the forum instead of silently doing nothing. */
+/* Resolve a tapped line to the closest selectable row. In list views a topic
+ * block is "title" (item) + "author/meta" (kind=0), so tapping the meta line
+ * should still open the thread. The match is capped at distance 1: wider gaps
+ * are spacing on purpose, and tapping them must fall through to page-turn
+ * instead of opening whatever entry happens to be nearest. */
 static int hit_item_line(App *a, int line_index) {
     const Page *pg = &a->book.pages[a->page_index];
     if (line_index < 0 || line_index >= pg->count) return -1;
     if (a->book.lines[pg->start + line_index].item_id > 0) return line_index;
-    if (a->view != V_FORUMS && a->view != V_TOPICS) return -1;
-    for (int d = 1; d < pg->count; d++) {
+    if (a->view != V_FORUMS && a->view != V_TOPICS && a->view != V_FAVLIST)
+        return -1;
+    for (int d = 1; d <= 1; d++) {
         int up = line_index - d, dn = line_index + d;
         if (up >= 0 && a->book.lines[pg->start + up].item_id > 0) return up;
         if (dn < pg->count && a->book.lines[pg->start + dn].item_id > 0) return dn;
@@ -1311,7 +1516,8 @@ static int hit_item_line(App *a, int line_index) {
 
 static int activate_is_item(App *a, int line_index) {
     if (a->view != V_FORUMS && a->view != V_TOPICS &&
-        a->view != V_MENU && a->view != V_SETTINGS) return 0;
+        a->view != V_MENU && a->view != V_SETTINGS &&
+        a->view != V_FAVLIST) return 0;
     return hit_item_line(a, line_index) >= 0;
 }
 
@@ -1325,6 +1531,7 @@ static void activate(App *a, int line_index) {
     else if (a->view == V_SETTINGS) settings_action(a, hit);
     else if (a->view == V_FORUMS) show_topics(a, id, 1, 0, 0);
     else if (a->view == V_TOPICS) show_thread(a, id, 1, 0, 0);
+    else if (a->view == V_FAVLIST) { a->in_fav = 1; show_thread(a, id, 1, 0, 0); }
 }
 
 static void move_sel(App *a, int dir) {
@@ -1383,6 +1590,16 @@ static Action map_tap(App *a, const InputEvent *ev, int *line_index) {
     if (row >= 0 && hit_item_line(a, row) >= 0) {
         *line_index = row;
         return ACT_SELECT;
+    }
+    /* image placeholders in a thread are tappable on their own */
+    if (row >= 0 && a->view == V_THREAD && a->book.np > 0 &&
+        a->page_index < a->book.np) {
+        const Page *pg = &a->book.pages[a->page_index];
+        if (row < pg->count &&
+            a->book.lines[pg->start + row].kind == L_IMGPH) {
+            *line_index = row;
+            return ACT_IMGV;
+        }
     }
     if (y > h * 88 / 100) return ACT_BACK;
     if (x >= a->geo.w * 62 / 100) return ACT_NEXT;
@@ -1471,8 +1688,8 @@ int app_run(const AppOptions *opt) {
     if (opt->diag) return app_diag();
 
     if (ui_init(&a.ui)) { log_msg("display init failed"); return 1; }
-    ui_set_fast_wfm(a.cfg.wfm_fast);
-    geometry_compute(&a.geo, a.ui.w, a.ui.h, a.ui.dpi, a.cfg.font_scale);
+    ui_set_refresh_mode(a.cfg.refresh_mode);
+    apply_rotation(&a);
     log_msg("geometry: %dx%d@%d scale=%d cols=%d rows=%d",
             a.geo.w, a.geo.h, a.geo.dpi, a.geo.scale, a.geo.cols, a.geo.rows);
     if (canvas_init(&a.canvas, a.geo.w, a.geo.h)) return 1;
@@ -1504,6 +1721,7 @@ int app_run(const AppOptions *opt) {
     book_init(&a.book, &a.geo);
     book_init(&a.snap_topics.book, &a.geo);
     book_init(&a.snap_thread.book, &a.geo);
+    str_init(&a.img_urls);
     net_init(&a.cfg);
     input_set_screen(a.geo.w, a.geo.h);
     input_set_calib(a.cfg.cal_swap, a.cfg.cal_flip_x, a.cfg.cal_flip_y);
@@ -1547,6 +1765,9 @@ int app_run(const AppOptions *opt) {
          * code redrew the whole page on every empty poll, which turned any
          * gesture into a storm of full e-ink refreshes. */
         if (input_read(&ev, 300000) <= 0) continue;
+        /* touch panel speaks panel coordinates; rotate into logical space
+         * before anything looks at ev.x/ev.y */
+        if (a.cfg.rotation != 0 && ev.tap) rotate_touch(&a, &ev.x, &ev.y);
         Action act = ev.act;
         int line_index = -1;
 
@@ -1605,9 +1826,11 @@ int app_run(const AppOptions *opt) {
                     /* park the thread so re-opening it is instant */
                     snap_put(&a.snap_thread, &a.book, a.cur_tid, a.thread_page,
                              a.thread_last, a.page_index, a.sel_line);
-                    show_topics(&a, a.cur_fid, a.topic_page, 0, 0);
+                    if (a.in_fav) { a.in_fav = 0; show_fav_list(&a); }
+                    else show_topics(&a, a.cur_fid, a.topic_page, 0, 0);
                 }
                 else if (a.view == V_TOPICS) show_forums(&a);
+                else if (a.view == V_FAVLIST) show_menu_view(&a);
                 else if (a.view == V_MENU || a.view == V_TEXT ||
                          a.view == V_SETTINGS) show_menu_view(&a);
                 else {
@@ -1616,20 +1839,23 @@ int app_run(const AppOptions *opt) {
                     a.msg_action = 1;
                 }
                 break;
-            case ACT_PAGE_PREV:
-                if (a.view == V_THREAD && a.thread_page > 1)
-                    show_thread(&a, a.cur_tid, a.thread_page - 1, 0, 0);
-                else if (a.view == V_TOPICS && a.topic_page > 1)
-                    show_topics(&a, a.cur_fid, a.topic_page - 1, 0, 0);
-                else app_draw(&a, "已经是第一页");
+            /* Footer page buttons = plain book page turns. Turning past the
+             * last page auto-fetches the next forum page (topic lists and
+             * threads) — the ZhihuReader-style infinite flow, no more
+             * "1/8 but nothing happens" confusion. */
+            case ACT_PAGE_PREV: turn_prev(&a); break;
+            case ACT_PAGE_NEXT: turn_next(&a); break;
+            case ACT_IMGV: {
+                int iid = 0;
+                if (line_index >= 0 && a.book.np > 0 &&
+                    a.page_index < a.book.np) {
+                    const Page *pg = &a.book.pages[a.page_index];
+                    if (line_index < pg->count)
+                        iid = a.book.lines[pg->start + line_index].item_id;
+                }
+                if (iid > 0) img_open(&a, iid);
                 break;
-            case ACT_PAGE_NEXT:
-                if (a.view == V_THREAD && a.thread_page < a.thread_last)
-                    show_thread(&a, a.cur_tid, a.thread_page + 1, 0, 0);
-                else if (a.view == V_TOPICS && a.topic_page < a.topic_last)
-                    show_topics(&a, a.cur_fid, a.topic_page + 1, 0, 0);
-                else app_draw(&a, "已经是最后一页");
-                break;
+            }
             case ACT_HOME:    show_menu_view(&a); break;
             case ACT_MENU:    show_menu_view(&a); break;
             case ACT_REFRESH: reload(&a); break;
@@ -1660,6 +1886,7 @@ done:
     book_free(&a.book);
     book_free(&a.snap_topics.book);
     book_free(&a.snap_thread.book);
+    str_free(&a.img_urls);
     canvas_free(&a.canvas);
     font_free(&a.font);
     ui_close();
