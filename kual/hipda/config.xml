@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<extension>
+  <information>
+    <name>HiPDA</name>
+    <version>0.9.0</version>
+    <author>hipda-kindle</author>
+    <id>hipda</id>
+  </information>
+  <menus>
+    <menu type="json">menu.json</menu>
+  </menus>
+</extension>

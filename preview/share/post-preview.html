@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>帖子预览 · HiPDA Kindle 原生阅读器</title>
+<style>
+  :root { --ink:#1a1a1a; --sub:#666; --line:#e2e2e2; --accent:#b03a2e; --bg:#fff; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:#f2f3f5; color:var(--ink);
+         font:16px/1.75 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif; }
+  .wrap { max-width:860px; margin:0 auto; padding:24px 16px 64px; }
+  .note { background:#fff8e1; border:1px solid #ffe082; border-radius:8px;
+          padding:12px 16px; font-size:14px; color:#7a5c00; margin-bottom:18px; }
+  .post { background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:28px 32px 36px; }
+  h1 { font-size:25px; line-height:1.45; margin:0 0 6px; letter-spacing:.2px; }
+  .meta { color:var(--sub); font-size:13px; padding-bottom:14px; border-bottom:1px solid var(--line); margin-bottom:22px; }
+  .meta b { color:var(--ink); font-weight:600; }
+  h2 { font-size:18px; margin:30px 0 10px; padding-left:10px; border-left:4px solid var(--accent); }
+  p { margin:10px 0; }
+  ul { margin:10px 0; padding-left:22px; }
+  li { margin:5px 0; }
+  code { background:#f4f4f4; padding:1px 5px; border-radius:4px; font-size:14px; }
+  pre { background:#f7f7f8; border:1px solid var(--line); border-radius:8px;
+        padding:12px 14px; overflow:auto; font-size:13.5px; line-height:1.6; }
+  figure { margin:18px 0; text-align:center; }
+  figure img { max-width:420px; width:100%; border:1px solid #d8d8d8; border-radius:6px; background:#fff; }
+  figcaption { color:var(--sub); font-size:13px; margin-top:7px; }
+  table { width:100%; border-collapse:collapse; margin:14px 0; font-size:14.5px; }
+  th, td { border:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top; }
+  th { background:#fafafa; font-weight:600; }
+  .dl { background:#f0f7ff; border:1px solid #bcdcff; border-radius:8px; padding:14px 18px; margin:18px 0; }
+  .dl a { color:#0b62c4; word-break:break-all; }
+  .limit { background:#fff5f5; border:1px solid #ffd6d6; border-radius:8px; padding:12px 18px; }
+  .limit li { color:#7a2626; }
+  .tag { display:inline-block; background:#eef3f8; color:#3a5a78; border-radius:4px;
+         padding:1px 8px; font-size:12.5px; margin-right:6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="note">
+    <b>这是发布前的预览</b>：下面就是准备发到 Discovery 板块的完整内容（标题 + 正文 + 6 张截图）。
+    确认没问题我再登录论坛提交；要改哪里直接说。
+  </div>
+
+  <div class="post">
+    <h1>告别 Kindle 浏览器：给越狱 Kindle 写了个 HiPDA 原生客户端（整页翻页 · 离线缓存 · 附下载）</h1>
+    <div class="meta">
+      板块：<b>Discovery</b> · 标签：
+      <span class="tag">Kindle</span><span class="tag">原生开发</span><span class="tag">C99</span>
+    </div>
+
+    <p>用 Kindle 自带的浏览器刷论坛，大概是这样的体验：页面元素挤成一团、要不停缩放拖动、翻一页等半天，还经常点错链接。既然 Kindle 最擅长的就是「一页一页地翻」，那就干脆给它做一个像看书一样刷论坛的客户端。</p>
+
+    <p>这是个跑在越狱 Kindle 上的原生 ARM 程序：不依赖 KOReader、不是网页套壳、也不需要电脑或手机配合。单个静态链接的可执行文件，直接操作帧缓冲、直接读触摸屏，自己完成 GBK 解码、正文清洗和中文排版。</p>
+
+    <h2>它长什么样</h2>
+
+    <figure>
+      <img src="01-forums.png" alt="板块首页">
+      <figcaption>板块首页：顶部工具栏（左 Hi 菜单 / 中标题 / 右页码与刷新），一屏 10 个板块</figcaption>
+    </figure>
+
+    <figure>
+      <img src="02-topics.png" alt="主题列表">
+      <figcaption>板块主题列表：标题 + 作者/回复数/时间，页脚有「上一页 / 下一页 / 返回」</figcaption>
+    </figure>
+
+    <figure>
+      <img src="03-thread.png" alt="帖子正文">
+      <figcaption>帖子正文：按屏幕宽度重新折行，楼层之间用细分隔线，整页翻页没有滚动条</figcaption>
+    </figure>
+
+    <h2>主要功能</h2>
+    <ul>
+      <li><b>整页翻页，不是滚动</b>：正文按真实屏幕宽高重新排版、切页，翻页就像看电子书。点屏幕左右两侧翻页，也可以用实体翻页键。</li>
+      <li><b>点按有反馈</b>：手指按住哪一行，那一行立刻反色成黑底白字，抬起才执行——e-ink 刷新慢，这个反馈很有用。</li>
+      <li><b>离线缓存 + 秒回</b>：看过的板块列表和帖子会存在机身里，返回上一级是瞬时的（排版结果直接换回来，不重新解析）。只有点右上角刷新键才会重新联网。</li>
+      <li><b>设备上直接登录</b>：没有账号时启动进登录页，用屏幕键盘输入用户名密码；密码在设备上算成 MD5 后存盘，不留明文。</li>
+      <li><b>日间 / 夜间主题</b>：白底黑字与黑底白字一键切换，设置随配置保存。</li>
+      <li><b>触摸校准</b>：有些面板的坐标是互换或镜像的，设置里点四个角就能自动校正，不用改代码。</li>
+      <li><b>加载可取消</b>：抓网页在子进程里做，加载时点一下屏幕就能中止，不会假死。</li>
+      <li><b>快刷档位</b>：翻页默认用 DU 波形（约 260ms、纯黑白），每几页自动全刷一次清残影；嫌慢或嫌糊可以在设置里切。</li>
+    </ul>
+
+    <figure>
+      <img src="04-menu.png" alt="主菜单">
+      <figcaption>主菜单：论坛 / 搜索 / 我的帖子 / 我的回复 / 我的收藏 / 短消息 / 帖子消息 / 设置 / 切换主题 / 退出</figcaption>
+    </figure>
+
+    <figure>
+      <img src="05-settings.png" alt="设置">
+      <figcaption>设置：字号、主题、刷屏方式、全刷频率、登录、触摸校准、清理缓存</figcaption>
+    </figure>
+
+    <figure>
+      <img src="06-login.png" alt="登录页">
+      <figcaption>登录页：内置英文屏幕键盘，按键按 3 格间距排布，不容易点错</figcaption>
+    </figure>
+
+    <h2>技术上的几个选择</h2>
+    <table>
+      <tr><th>问题</th><th>做法</th></tr>
+      <tr><td>中文显示</td><td>不引入字体引擎，用 Unifont 点阵字库（HUF1），ASCII 占 1 格、汉字占 2 格，按显示宽度折行</td></tr>
+      <tr><td>屏幕适配</td><td>不硬编码分辨率，运行时从 FBInk 读真实宽高和 DPI，反算字号、每行字数、每页行数</td></tr>
+      <tr><td>刷新</td><td>翻页用 DU 波形，每 N 页补一次 GC16 全刷；按压反馈只刷那一行（局部刷新）</td></tr>
+      <tr><td>联网</td><td>调用系统 curl（不交叉编译 OpenSSL），在 fork 出的子进程里跑，父进程继续响应触摸</td></tr>
+      <tr><td>论坛解析</td><td>论坛是 Discuz! 7.2 + GBK，解析规则集中在 <code>src/discuz.c</code> 顶部一张表里，改版时对着真实页面调</td></tr>
+    </table>
+
+    <h2>安装</h2>
+    <p>需要已越狱 + 已装 KUAL。把压缩包里的 <code>extensions/hipda</code> 整个目录放到 Kindle 的 <code>/mnt/us/extensions/</code> 下，然后 KUAL →「HiPDA 论坛」启动。</p>
+    <p><b>安装包不自带账号</b>，首次启动会进登录页，输入你自己的论坛账号即可（密码只存 MD5）。</p>
+
+    <div class="dl">
+      <b>下载（蓝奏云，不限速）</b><br>
+      <a href="https://wwp.lanzoup.com/iQTD24g86l7i">https://wwp.lanzoup.com/iQTD24g86l7i</a><br>
+      <span style="color:#666;font-size:14px">文件：hipda-kindle-armv6_25.zip（约 1 MB）· ARMv6 软浮点静态链接，K2/K3/K4/K5/PW/Oasis 通用</span>
+    </div>
+
+    <h2>目前的限制（说清楚，免得白折腾）</h2>
+    <div class="limit">
+      <ul>
+        <li><b>只读</b>：不能发帖、回帖。Kindle 没有中文输入法，硬做要自己塞拼音码表，暂时没做。</li>
+        <li>「搜索 / 我的帖子 / 我的回复 / 我的收藏 / 短消息 / 帖子消息」这几项是把对应页面转成整页文本显示，排版不如专门的列表精致，个别页面可能因为模板差异显示不全。</li>
+        <li>主要在 Oasis 3（1264×1680）上验证。其他机型靠运行时自适应，K2/K3 这类极老内核理论上能跑，但我没有实机。</li>
+        <li>论坛对游客有访问限制，登录后才能看完整内容。</li>
+      </ul>
+    </div>
+
+    <h2>反馈</h2>
+    <p>装机后如果白屏或点不动，KUAL 菜单里有「屏幕自检」和「环境自检」，会生成 <code>check.txt</code>，把那个文件发上来我基本能定位问题。有 bug 或者想要的功能都欢迎回帖，我尽量跟。</p>
+
+    <p style="color:#666;font-size:14px;margin-top:26px">（程序用 C99 写的，跨平台部分和 Kindle 部分分离，PC 上能跑同一套解析与排版逻辑出预览图，改起来还算方便。）</p>
+  </div>
+</div>
+</body>
+</html>

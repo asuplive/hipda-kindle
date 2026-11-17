@@ -1,0 +1,46 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+ "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=gbk" />
+<meta name="generator" content="Discuz! 7.2" />
+<title>Kindle 上的 HiPDA 阅读体验讨论 - 4D4Y</title>
+</head><body>
+<div id="wrap"><div id="nav">4D4Y &raquo; Discovery</div>
+<div id="threadtitle"><h1>Kindle 上的 HiPDA 阅读体验讨论</h1></div><div id="postlist"><div id="post_90005">
+<table id="pid90005" summary="post"><tr>
+<td class="postauthor"><div class="postinfo"><a href="space.php?uid=100">墨水瓶</a></div></td>
+<td class="postcontent">
+  <div class="postinfo">
+    <div class="posterinfo"><div class="authorinfo"><em>2026-11-14 09:12</em></div></div>
+    <strong><a href="viewthread.php?tid=1579403&page=1#pid90005"><em>5</em></a></strong>
+  </div>
+  <div class="defaultpost"><div class="postmessage"><div class="t_msgfontfix">
+    <table><tr><td class="t_msgfont">楼主开门见山：越狱之后的 Kindle 其实是一台 ARM Linux 小机器，只要能直接写 framebuffer，就能做出完全脱离 KOReader 的原生程序。<br/><br/>我最近在折腾一个论坛客户端，最想要的就是「整页翻页」——看长帖时不要一行行滚，而是一屏一屏翻，和读电子书一样。这里有两个难点：一是中文字形，老机型没有好用的系统字体；二是翻到论坛分页末尾时要自动把下一页接上，不能让用户点「下一页」按钮。<br/><br/>试试表情：<img src="images/smilies/default_smile.gif" /> 和 <img src="images/smilies/default_biggrin.gif" />，再放张图：<img src="attachments/photo_01.jpg" file="attachment.php?aid=88" alt="" /><br/>引用一下楼下的话：<div class="quote">点左侧返回，点右侧翻页，这个习惯很好记。</div><br/>结尾来个 &amp; 符号和 &nbsp; 空格，还有 <b>加粗</b> 与 <a href="https://example.com">外链文字</a>。</td></tr></table>
+  </div></div></div>
+  <div class="postattachlist"><dl class="t_attachlist"><p class="attachname">
+    <a href="attachment.php?aid=88">photo_01.jpg</a></p></dl></div>
+</td></tr></table>
+</div>
+<div id="post_90006">
+<table id="pid90006" summary="post"><tr>
+<td class="postauthor"><div class="postinfo"><a href="space.php?uid=101">老陈</a></div></td>
+<td class="postcontent">
+  <div class="postinfo">
+    <div class="posterinfo"><div class="authorinfo"><em>2026-11-14 10:03</em></div></div>
+    <strong><a href="viewthread.php?tid=1579403&page=1#pid90006"><em>6</em></a></strong>
+  </div>
+  <div class="defaultpost"><div class="postmessage"><div class="t_msgfontfix">
+    <table><tr><td class="t_msgfont">点左侧返回，点右侧翻页，这个习惯很好记。<br/><br/>补充一点：e-ink 的局部刷新会留残影，所以每隔几页要来一次 GC16 全刷，Kindle 原生阅读器也是这么做的。频率设成 6 页左右比较舒服。<br/>另外老设备（K3、K4）没有触摸，只有物理翻页键，输入层得同时读 EV_KEY。屏幕坐标也别硬编码，用 framebuffer 报上来的宽高和 DPI 反推字号才靠谱。</td></tr></table>
+  </div></div></div>
+  <div class="postattachlist"><dl class="t_attachlist"><p class="attachname">
+    <a href="attachment.php?aid=88">photo_01.jpg</a></p></dl></div>
+</td></tr></table>
+</div>
+</div><div class="forumcontrol"><div class="pages">
+<a href="viewthread.php?tid=1579403&page=1">1</a>
+<a href="viewthread.php?tid=1579403&page=2">2</a>
+<a href="viewthread.php?tid=1579403&page=3">3</a>
+<strong>2</strong>
+</div></div>
+</div></body></html>

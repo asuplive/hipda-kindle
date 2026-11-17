@@ -1,0 +1,28 @@
+# Build artifacts and local caches
+.cache/
+build/
+*.o
+*.obj
+*.exe
+*.a
+*.pyc
+__pycache__/
+
+# Historical preview renders (396 MB of exploration artifacts).
+# Keep only preview/share/ as the clean, account-free documentation screenshots.
+preview/*
+!preview/share/
+preview/share/*.pgm
+
+# Local credentials / runtime state (never ship these)
+cookies.txt
+config.local.ini
+*.log
+*.pdb
+diag.txt
+check.txt
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+*.swp

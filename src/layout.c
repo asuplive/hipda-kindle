@@ -1,0 +1,320 @@
+#include "layout.h"
+#include "gbk.h"
+#include "util.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+void geometry_compute(Geometry *g, int w, int h, int dpi, int font_scale) {
+    if (dpi <= 0) dpi = 167;
+    if (w <= 0) w = 600;
+    if (h <= 0) h = 800;
+    int scale = font_scale > 0 ? font_scale : (dpi + 50) / 100;
+    if (scale < 1) scale = 1;
+    if (scale > 4) scale = 4;
+    g->w = w; g->h = h; g->dpi = dpi; g->scale = scale;
+    g->cell_w = 8 * scale;
+    g->cell_h = 16 * scale;
+    g->line_h = g->cell_h + 6 * scale;   /* a little more air between lines */
+    g->margin_x = 2 * g->cell_w;
+    g->margin_y = g->cell_h;
+    g->cols = (w - 2 * g->margin_x) / g->cell_w;
+    if (g->cols < 12) g->cols = 12;
+    g->rows = (h - 2 * g->margin_y - 2 * g->line_h) / g->line_h;
+    if (g->rows < 4) g->rows = 4;
+}
+
+void book_init(Book *b, const Geometry *g) {
+    memset(b, 0, sizeof(*b));
+    b->cols = g->cols; b->rows = g->rows;
+}
+void book_reset(Book *b) {
+    for (int i = 0; i < b->n; i++) free(b->lines[i].text);
+    b->n = 0; b->np = 0;
+}
+void book_free(Book *b) {
+    book_reset(b);
+    free(b->lines); free(b->pages);
+    memset(b, 0, sizeof(*b));
+}
+static void push_line(Book *b, LineKind kind, char *text, int indent,
+                      int item_id, int forum_page) {
+    if (b->n == b->cap) {
+        b->cap = b->cap ? b->cap * 2 : 128;
+        b->lines = xrealloc(b->lines, (size_t)b->cap * sizeof(Line));
+    }
+    Line *l = &b->lines[b->n++];
+    l->kind = kind; l->text = text; l->indent = indent;
+    l->item_id = item_id; l->forum_page = forum_page;
+}
+int book_add_line(Book *b, LineKind kind, const char *text, int indent,
+                  int item_id, int forum_page) {
+    push_line(b, kind, xstrdup(text ? text : ""), indent, item_id, forum_page);
+    return b->n;
+}
+
+/* Keep Chinese/ASCII closing punctuation attached to the previous line
+ * instead of letting it dangle at the start of the next one. */
+static int is_closing_punct(uint32_t cp) {
+    if (cp == ',' || cp == '.' || cp == ';' || cp == ':' || cp == '!' ||
+        cp == '?' || cp == ')' || cp == ']' || cp == '}') return 1;
+    switch (cp) {
+        case 0xFF0C: case 0xFF0E: case 0x3002: case 0xFF1B: case 0xFF1A:
+        case 0xFF01: case 0xFF1F: case 0xFF09: case 0x300B: case 0x300D:
+        case 0x300F: case 0x201D: case 0x2019: case 0x3001: case 0x300A:
+            return 1;
+        default: return 0;
+    }
+}
+
+int book_wrap_text(Book *b, const Geometry *g, LineKind kind, const char *text,
+                   int indent, int item_id, int forum_page) {
+    if (!text) text = "";
+    int avail = g->cols - indent;
+    if (avail < 4) avail = 4;
+    Str line; str_init(&line);
+    int used = 0;
+    const char *p = text, *end = text + strlen(text);
+    int produced = 0;
+    while (p < end) {
+        const char *q = p;
+        uint32_t cp = utf8_next(&p, end);
+        if (cp == '\n') {
+            push_line(b, kind, xstrdup(line.data), indent, item_id, forum_page);
+            produced++;
+            str_clear(&line); used = 0;
+            continue;
+        }
+        int cw = utf8_cells(cp);
+        if (cw <= 0) continue;
+        if (used + cw > avail && used > 0 && !is_closing_punct(cp)) {
+            push_line(b, kind, xstrdup(line.data), indent, item_id, forum_page);
+            produced++;
+            str_clear(&line); used = 0;
+        }
+        str_append_n(&line, q, (size_t)(p - q));
+        used += cw;
+    }
+    push_line(b, kind, xstrdup(line.data), indent, item_id, forum_page);
+    produced++;
+    str_free(&line);
+    return produced;
+}
+
+void book_finalize(Book *b, const Geometry *g) {
+    b->np = 0;
+    b->rows = g->rows;
+    int rows = g->rows < 1 ? 1 : g->rows;
+    for (int i = 0; i < b->n; i += rows) {
+        if (b->np == b->pcap) {
+            b->pcap = b->pcap ? b->pcap * 2 : 16;
+            b->pages = xrealloc(b->pages, (size_t)b->pcap * sizeof(Page));
+        }
+        Page *pg = &b->pages[b->np++];
+        pg->start = i;
+        pg->count = b->n - i < rows ? b->n - i : rows;
+        pg->forum_page = b->lines[i].forum_page;
+    }
+    if (b->np == 0) {
+        b->pcap = 1;
+        b->pages = xrealloc(b->pages, sizeof(Page));
+        b->pages[0].start = 0; b->pages[0].count = 0; b->pages[0].forum_page = 1;
+        b->np = 1;
+    }
+}
+
+int book_from_forums(Book *b, const Geometry *g, const Config *cfg) {
+    book_reset(b);
+    str_copy(b->title, sizeof(b->title), "HiPDA 论坛");
+    str_copy(b->subtitle, sizeof(b->subtitle), "选择板块");
+    b->fid = 0; b->tid = 0;
+    /* The page header already shows b->title; do not repeat it in the body. */
+    book_wrap_text(b, g, L_NOTE, "点条目进入 · 左上角 Hi 菜单", 0, 0, 1);
+    book_add_line(b, L_BLANK, "", 0, 0, 1);
+    int count = cfg->nforums > 0 ? cfg->nforums : kForumsCount;
+    for (int i = 0; i < count; i++) {
+        int fid = cfg->nforums > 0 ? cfg->forums[i] : kForums[i].fid;
+        const Forum *f = forum_by_fid(fid);
+        if (!f) continue;
+        char row[HIPDA_NAME_LEN];
+        /* one line per forum, plus a blank line between entries: bigger touch
+         * targets matter more than density on a 6" e-ink screen */
+        snprintf(row, sizeof(row), "· %s", f->name);
+        book_wrap_text(b, g, L_ITEM, row, 0, fid, 1);
+        book_add_line(b, L_BLANK, "", 0, 0, 1);
+    }
+    book_finalize(b, g);
+    return b->n;
+}
+
+/* Start an appended Discuz page on a fresh book page. Without this, the
+ * trailing partial page would be silently filled with new posts and the
+ * reader would skip them when turning the page. */
+static void pad_to_page_boundary(Book *b, const Geometry *g, int forum_page) {
+    if (!b->n) return;
+    int rows = g->rows > 0 ? g->rows : 1;
+    int pad = (rows - (b->n % rows)) % rows;
+    for (int i = 0; i < pad; i++)
+        book_add_line(b, L_BLANK, "", 0, 0, forum_page);
+}
+
+int book_from_topics(Book *b, const Geometry *g, const TopicList *list,
+                     const Forum *forum, int append) {
+    if (!append) book_reset(b);
+    else pad_to_page_boundary(b, g, list->page);
+    const char *fname = forum ? forum->name : "主题列表";
+    if (!append) {
+        snprintf(b->title, sizeof(b->title), "%s", fname);
+        snprintf(b->subtitle, sizeof(b->subtitle), "第 %d / %d 页",
+                 list->page, list->last_page);
+        b->fid = list->fid; b->tid = 0;
+    }
+    if (append) {
+        char note[128];
+        snprintf(note, sizeof(note), "—— 论坛第 %d 页 ——", list->page);
+        book_add_line(b, L_NOTE, note, 0, 0, list->page);
+        book_add_line(b, L_BLANK, "", 0, 0, list->page);
+    }
+    for (int i = 0; i < list->n; i++) {
+        const Topic *t = &list->v[i];
+        char row[HIPDA_NAME_LEN];
+        snprintf(row, sizeof(row), "%s%s", t->is_sticky ? "[顶] " : "  ",
+                 t->title[0] ? t->title : "(无标题)");
+        book_wrap_text(b, g, L_ITEM, row, 0, t->tid, list->page);
+        char meta[256];
+        snprintf(meta, sizeof(meta), "     %s  ·  回复 %d%s",
+                 t->author[0] ? t->author : "匿名", t->replies,
+                 t->has_attach ? "  · 有图" : "");
+        book_add_line(b, L_META, meta, 0, t->tid, list->page);
+    }
+    book_finalize(b, g);
+    return b->n;
+}
+
+int book_from_thread(Book *b, const Geometry *g, const ThreadPage *thread,
+                     int append) {
+    if (!append) book_reset(b);
+    else pad_to_page_boundary(b, g, thread->page);
+    if (!append) {
+        str_copy(b->title, sizeof(b->title),
+                 thread->title[0] ? thread->title : "帖子正文");
+        snprintf(b->subtitle, sizeof(b->subtitle), "论坛第 %d / %d 页",
+                 thread->page, thread->last_page);
+        b->fid = 0; b->tid = thread->tid;
+    } else {
+        char note[128];
+        snprintf(note, sizeof(note), "—— 论坛第 %d 页 ——", thread->page);
+        book_add_line(b, L_NOTE, note, 0, 0, thread->page);
+        book_add_line(b, L_BLANK, "", 0, 0, thread->page);
+    }
+    for (int i = 0; i < thread->nposts; i++) {
+        const Post *p = &thread->posts[i];
+        char meta[HIPDA_NAME_LEN];
+        snprintf(meta, sizeof(meta), "%d 楼  %s  %s", p->floor,
+                 p->author[0] ? p->author : "匿名", p->dateline);
+        if (i > 0 || append) book_add_line(b, L_SEP, "", 0, 0, thread->page);
+        book_wrap_text(b, g, L_META, meta, 0, 0, thread->page);
+        book_wrap_text(b, g, L_BODY, p->body.data, 0, 0, thread->page);
+        book_add_line(b, L_BLANK, "", 0, 0, thread->page);
+    }
+    book_finalize(b, g);
+    return b->n;
+}
+
+static const char *kind_name(LineKind k) {
+    switch (k) {
+        case L_TITLE: return "title";
+        case L_META:  return "meta";
+        case L_BODY:  return "body";
+        case L_ITEM:  return "item";
+        case L_SEP:   return "sep";
+        case L_NOTE:  return "note";
+        default:      return "blank";
+    }
+}
+static void json_str(FILE *f, const char *s) {
+    fputc('"', f);
+    for (const unsigned char *p = (const unsigned char *)s; *p; p++) {
+        switch (*p) {
+            case '"': fputs("\\\"", f); break;
+            case '\\': fputs("\\\\", f); break;
+            case '\n': fputs("\\n", f); break;
+            case '\r': fputs("\\r", f); break;
+            case '\t': fputs("\\t", f); break;
+            default:
+                if (*p < 0x20) fprintf(f, "\\u%04x", *p);
+                else fputc(*p, f);
+        }
+    }
+    fputc('"', f);
+}
+int book_write_json(Book *b, const char *path) {
+    FILE *f = fopen(path, "wb");
+    if (!f) return -1;
+    fprintf(f, "{\n\"title\": "); json_str(f, b->title);
+    fprintf(f, ",\n\"subtitle\": "); json_str(f, b->subtitle);
+    fprintf(f, ",\n\"fid\": %d, \"tid\": %d, \"cols\": %d, \"rows\": %d,\n",
+            b->fid, b->tid, b->cols, b->rows);
+    fputs("\"pages\": [\n", f);
+    for (int pi = 0; pi < b->np; pi++) {
+        Page *pg = &b->pages[pi];
+        fprintf(f, "{\"index\": %d, \"forum_page\": %d, \"png\": \"page_%03d.png\", \"lines\": [",
+                pi, pg->forum_page, pi);
+        for (int i = 0; i < pg->count; i++) {
+            Line *l = &b->lines[pg->start + i];
+            fprintf(f, "%s{\"kind\": \"%s\", \"text\": ", i ? ", " : "", kind_name(l->kind));
+            json_str(f, l->text);
+            fprintf(f, ", \"indent\": %d, \"item_id\": %d, \"forum_page\": %d}",
+                    l->indent, l->item_id, l->forum_page);
+        }
+        fprintf(f, "]},\n");
+    }
+    fseek(f, -2, SEEK_CUR);     /* drop trailing ",\n" (safe: np >= 1) */
+    fputs("\n]\n}\n", f);
+    fclose(f);
+    return 0;
+}
+
+/* ---------------------------------------------------------------- menus -- */
+
+int book_from_menu(Book *b, const Geometry *g, const char *title,
+                   const char *subtitle, const char *const *items, int n) {
+    book_reset(b);
+    str_copy(b->title, sizeof(b->title), title && *title ? title : "菜单");
+    str_copy(b->subtitle, sizeof(b->subtitle), subtitle ? subtitle : "");
+    b->fid = 0; b->tid = 0;
+    for (int i = 0; i < n; i++) {
+        char row[HIPDA_NAME_LEN];
+        snprintf(row, sizeof(row), "%d  %s", i + 1, items[i] ? items[i] : "");
+        book_wrap_text(b, g, L_ITEM, row, 0, i + 1, 1);
+        book_add_line(b, L_BLANK, "", 0, 0, 1);   /* spacing = fewer mis-taps */
+    }
+    book_finalize(b, g);
+    return b->n;
+}
+
+int book_from_text(Book *b, const Geometry *g, const char *title,
+                   const char *text) {
+    book_reset(b);
+    str_copy(b->title, sizeof(b->title), title && *title ? title : "内容");
+    b->subtitle[0] = 0;
+    b->fid = 0; b->tid = 0;
+    const char *p = text ? text : "";
+    if (!*p) book_add_line(b, L_NOTE, "（这里没有内容）", 0, 0, 1);
+    while (*p) {
+        const char *nl = strchr(p, '\n');
+        size_t n = nl ? (size_t)(nl - p) : strlen(p);
+        char stackbuf[1024];
+        if (n >= sizeof(stackbuf)) n = sizeof(stackbuf) - 1;
+        memcpy(stackbuf, p, n);
+        stackbuf[n] = 0;
+        char *trimmed = str_trim(stackbuf);
+        if (*trimmed) book_wrap_text(b, g, L_BODY, trimmed, 0, 0, 1);
+        else book_add_line(b, L_BLANK, "", 0, 0, 1);
+        if (!nl) break;
+        p = nl + 1;
+    }
+    book_finalize(b, g);
+    return b->n;
+}

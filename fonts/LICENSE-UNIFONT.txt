@@ -1,0 +1,21 @@
+fonts/unifont.bin is generated from GNU Unifont 13.0.04 .hex data.
+
+Source of the .hex file used by tools/gen_font.py:
+  https://github.com/NiLuJe/FBInk/blob/master/fonts/unifont-13.0.04.hex.gz
+  (fetched via https://cdn.jsdelivr.net/gh/NiLuJe/FBInk@master/fonts/unifont-13.0.04.hex.gz)
+
+Upstream project: https://unifoundry.com/unifont/
+License: GNU Unifont is distributed under GPLv2-or-later WITH the font
+embedding exception (embedding the font in a document/binary does not force
+that document/binary to be GPL). The .hex source data is dual-licensed; see
+the upstream README and the COPYING file in the Unifont distribution for the
+authoritative terms.
+
+unifont.bin is NOT source code of hipda-kindle: it is a generated data file
+(HUF1 format: sorted codepoint + 16x16 1bpp bitmap records), kept as a
+separate on-device asset so the rest of the program has no font-library
+dependency. If you redistribute this package, include this notice and comply
+with the Unifont license.
+
+Regenerate with:
+  python tools/gen_font.py

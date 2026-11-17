@@ -1,0 +1,76 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+ "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=gbk" />
+<meta name="generator" content="Discuz! 7.2" />
+<title>Kindle 上的 HiPDA 阅读体验讨论 - 4D4Y</title>
+</head><body>
+<div id="wrap"><div id="nav">4D4Y &raquo; Discovery</div>
+<div id="threadtitle"><h1>Kindle 上的 HiPDA 阅读体验讨论</h1></div><div id="postlist"><div id="post_90001">
+<table id="pid90001" summary="post"><tr>
+<td class="postauthor"><div class="postinfo"><a href="space.php?uid=100">墨水瓶</a></div></td>
+<td class="postcontent">
+  <div class="postinfo">
+    <div class="posterinfo"><div class="authorinfo"><em>2026-11-14 09:12</em></div></div>
+    <strong><a href="viewthread.php?tid=1579403&page=1#pid90001"><em>1</em></a></strong>
+  </div>
+  <div class="defaultpost"><div class="postmessage"><div class="t_msgfontfix">
+    <table><tr><td class="t_msgfont">楼主开门见山：越狱之后的 Kindle 其实是一台 ARM Linux 小机器，只要能直接写 framebuffer，就能做出完全脱离 KOReader 的原生程序。<br/><br/>我最近在折腾一个论坛客户端，最想要的就是「整页翻页」——看长帖时不要一行行滚，而是一屏一屏翻，和读电子书一样。这里有两个难点：一是中文字形，老机型没有好用的系统字体；二是翻到论坛分页末尾时要自动把下一页接上，不能让用户点「下一页」按钮。<br/><br/>试试表情：<img src="images/smilies/default_smile.gif" /> 和 <img src="images/smilies/default_biggrin.gif" />，再放张图：<img src="attachments/photo_01.jpg" file="attachment.php?aid=88" alt="" /><br/>引用一下楼下的话：<div class="quote">点左侧返回，点右侧翻页，这个习惯很好记。</div><br/>结尾来个 &amp; 符号和 &nbsp; 空格，还有 <b>加粗</b> 与 <a href="https://example.com">外链文字</a>。</td></tr></table>
+  </div></div></div>
+  <div class="postattachlist"><dl class="t_attachlist"><p class="attachname">
+    <a href="attachment.php?aid=88">photo_01.jpg</a></p></dl></div>
+</td></tr></table>
+</div>
+<div id="post_90002">
+<table id="pid90002" summary="post"><tr>
+<td class="postauthor"><div class="postinfo"><a href="space.php?uid=101">老陈</a></div></td>
+<td class="postcontent">
+  <div class="postinfo">
+    <div class="posterinfo"><div class="authorinfo"><em>2026-11-14 10:03</em></div></div>
+    <strong><a href="viewthread.php?tid=1579403&page=1#pid90002"><em>2</em></a></strong>
+  </div>
+  <div class="defaultpost"><div class="postmessage"><div class="t_msgfontfix">
+    <table><tr><td class="t_msgfont">点左侧返回，点右侧翻页，这个习惯很好记。<br/><br/>补充一点：e-ink 的局部刷新会留残影，所以每隔几页要来一次 GC16 全刷，Kindle 原生阅读器也是这么做的。频率设成 6 页左右比较舒服。<br/>另外老设备（K3、K4）没有触摸，只有物理翻页键，输入层得同时读 EV_KEY。屏幕坐标也别硬编码，用 framebuffer 报上来的宽高和 DPI 反推字号才靠谱。</td></tr></table>
+  </div></div></div>
+  <div class="postattachlist"><dl class="t_attachlist"><p class="attachname">
+    <a href="attachment.php?aid=88">photo_01.jpg</a></p></dl></div>
+</td></tr></table>
+</div>
+<div id="post_90003">
+<table id="pid90003" summary="post"><tr>
+<td class="postauthor"><div class="postinfo"><a href="space.php?uid=102">wind</a></div></td>
+<td class="postcontent">
+  <div class="postinfo">
+    <div class="posterinfo"><div class="authorinfo"><em>2026-11-14 11:47</em></div></div>
+    <strong><a href="viewthread.php?tid=1579403&page=1#pid90003"><em>3</em></a></strong>
+  </div>
+  <div class="defaultpost"><div class="postmessage"><div class="t_msgfontfix">
+    <table><tr><td class="t_msgfont">GBK 编码是个隐藏大坑：论坛返回 text/html; charset=GBK，而墨水屏绘制库一般只吃 UTF-8。 Kindle 上的 gconv 模块不一定齐全，所以我把 GBK 到 Unicode 的映射表直接编进二进制，两万多条，占几十 KB，换来了零依赖。<br/><br/>字形同理，用 Unifont 的 16x16 点阵，ASCII 占一个单元、汉字占两个单元，折行按显示宽度算，中英混排不会错位。</td></tr></table>
+  </div></div></div>
+  <div class="postattachlist"><dl class="t_attachlist"><p class="attachname">
+    <a href="attachment.php?aid=88">photo_01.jpg</a></p></dl></div>
+</td></tr></table>
+</div>
+<div id="post_90004">
+<table id="pid90004" summary="post"><tr>
+<td class="postauthor"><div class="postinfo"><a href="space.php?uid=103">阿枢</a></div></td>
+<td class="postcontent">
+  <div class="postinfo">
+    <div class="posterinfo"><div class="authorinfo"><em>2026-11-14 14:20</em></div></div>
+    <strong><a href="viewthread.php?tid=1579403&page=1#pid90004"><em>4</em></a></strong>
+  </div>
+  <div class="defaultpost"><div class="postmessage"><div class="t_msgfontfix">
+    <table><tr><td class="t_msgfont">整理一下目前已知的限制，供后来人参考：<br/>1. 论坛必须登录才能看版块和帖子，游客会被拦在提示页；<br/>2. archiver 与 wap 目录实测都是 404，没法绕开登录；<br/>3. index.php 有 Cloudflare 的 JS 挑战，所以板块清单直接用客户端里那份 fid 表；<br/>4. Kindle 没有中文输入法，这个版本做成只读，不实现发帖和回复。<br/><br/>有账号的话，在电脑上生成 config.ini 放到 /mnt/us/hipda/ 就好，密码只存 MD5，不存明文。<img src="images/smilies/default_victory.gif" /></td></tr></table>
+  </div></div></div>
+  <div class="postattachlist"><dl class="t_attachlist"><p class="attachname">
+    <a href="attachment.php?aid=88">photo_01.jpg</a></p></dl></div>
+</td></tr></table>
+</div>
+</div><div class="forumcontrol"><div class="pages">
+<a href="viewthread.php?tid=1579403&page=1">1</a>
+<a href="viewthread.php?tid=1579403&page=2">2</a>
+<a href="viewthread.php?tid=1579403&page=3">3</a>
+<strong>1</strong>
+</div></div>
+</div></body></html>

@@ -1,0 +1,28 @@
+{
+  "items": [
+    {
+      "name": "HiPDA - 启动论坛",
+      "action": "sh /mnt/us/extensions/hipda/scripts/hipda.sh",
+      "exitmenu": true,
+      "refresh": false
+    },
+    {
+      "name": "HiPDA - 离线阅读缓存",
+      "action": "sh /mnt/us/extensions/hipda/scripts/hipda.sh offline",
+      "exitmenu": true,
+      "refresh": false
+    },
+    {
+      "name": "HiPDA - 屏幕自检(白屏排查)",
+      "action": "sh /mnt/us/extensions/hipda/scripts/diag.sh",
+      "exitmenu": true,
+      "refresh": false
+    },
+    {
+      "name": "HiPDA - 环境自检",
+      "action": "sh /mnt/us/extensions/hipda/scripts/check.sh",
+      "exitmenu": false,
+      "refresh": true
+    }
+  ]
+}
