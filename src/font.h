@@ -11,6 +11,10 @@ typedef struct {
     const uint8_t *records;    /* blob + 16 */
     uint32_t rec_size;
     uint8_t  cell_w, glyph_h, row_bytes;
+    /* hot-path lookup caches: ASCII is O(1); one-entry MRU for CJK runs */
+    const uint8_t *ascii[128];
+    uint32_t   last_cp;
+    const uint8_t *last_glyph;
 } Font;
 
 int  font_load(Font *f, const char *path);

@@ -52,7 +52,7 @@ static const char *kMenuItems[] = {
 #define MENU_THEME      10
 #define MENU_QUIT       11
 
-#define SETTINGS_N 10
+#define SETTINGS_N 11
 
 /* On-screen keyboard, three pages: lower-case, upper-case, digits/symbols.
  * Each key takes 3 cells (character + 2 blanks) so the keys are far enough
@@ -940,7 +940,6 @@ static void show_my_list(App *a, const char *title, const char *path) {
         const char *t = list.v[i].title[0] ? list.v[i].title : "（无标题）";
         snprintf(row, sizeof(row), "· %s", t);
         book_wrap_text(&a->book, &a->geo, L_ITEM, row, 0, list.v[i].tid, 1);
-        book_add_line(&a->book, L_BLANK, "", 0, 0, 1);
     }
     book_finalize(&a->book, &a->geo);
     topic_list_free(&list);
@@ -1003,7 +1002,6 @@ static void show_msg_list(App *a, const char *title, const char *path) {
         const char *t = list.v[i].title[0] ? list.v[i].title : "（无标题）";
         snprintf(row, sizeof(row), "· %s", t);
         book_wrap_text(&a->book, &a->geo, L_ITEM, row, 0, list.v[i].tid, 1);
-        book_add_line(&a->book, L_BLANK, "", 0, 0, 1);
     }
     book_finalize(&a->book, &a->geo);
     topic_list_free(&list);
@@ -1158,25 +1156,28 @@ static void build_settings_book(App *a) {
                           : a->cfg.font_scale == 1 ? "小"
                           : a->cfg.font_scale == 2 ? "中" : "大";
     snprintf(buf[0], HIPDA_NAME_LEN, "字号：%s", scale_txt);
-    snprintf(buf[1], HIPDA_NAME_LEN, "主题：%s",
+    const char *fname = strstr(a->cfg.font_file, "reading")
+                        ? "阅读体（宋体+等宽）" : "Unifont（经典点阵）";
+    snprintf(buf[1], HIPDA_NAME_LEN, "字体：%s", fname);
+    snprintf(buf[2], HIPDA_NAME_LEN, "主题：%s",
              a->cfg.theme ? "黑底白字（夜间）" : "白底黑字（日间）");
     static const char *const rm_names[4] = {
         "全刷（最清晰，最慢）", "局部刷（最快，有残影）",
         "Regal（Kindle 特有）", "智能（局部刷N页+全刷）"
     };
-    snprintf(buf[2], HIPDA_NAME_LEN, "刷屏模式：%s",
+    snprintf(buf[3], HIPDA_NAME_LEN, "刷屏模式：%s",
              rm_names[a->cfg.refresh_mode & 3]);
-    snprintf(buf[3], HIPDA_NAME_LEN, "每几页全刷：%d", a->cfg.full_refresh_every);
-    snprintf(buf[4], HIPDA_NAME_LEN, "屏幕旋转：%d°%s",
+    snprintf(buf[4], HIPDA_NAME_LEN, "每几页全刷：%d", a->cfg.full_refresh_every);
+    snprintf(buf[5], HIPDA_NAME_LEN, "屏幕旋转：%d°%s",
              a->cfg.rotation, a->cfg.rotation == 0 ? "（默认）" : "");
-    snprintf(buf[5], HIPDA_NAME_LEN, "图片显示：%s",
+    snprintf(buf[6], HIPDA_NAME_LEN, "图片显示：%s",
              a->cfg.img_mode ? "点按显示（自动缓存）" : "不显示");
-    snprintf(buf[6], HIPDA_NAME_LEN, "登录账号：%s",
+    snprintf(buf[7], HIPDA_NAME_LEN, "登录账号：%s",
              a->cfg.username[0] ? a->cfg.username : "（未登录）");
-    snprintf(buf[7], HIPDA_NAME_LEN, "触摸校准（swap=%d 镜像=%d/%d）",
+    snprintf(buf[8], HIPDA_NAME_LEN, "触摸校准（swap=%d 镜像=%d/%d）",
              a->cfg.cal_swap, a->cfg.cal_flip_x, a->cfg.cal_flip_y);
-    str_copy(buf[8], HIPDA_NAME_LEN, "清理缓存（离线内容与已读页面）");
-    str_copy(buf[9], HIPDA_NAME_LEN, "返回");
+    str_copy(buf[9], HIPDA_NAME_LEN, "清理缓存（离线内容与已读页面）");
+    str_copy(buf[10], HIPDA_NAME_LEN, "返回");
     for (int i = 0; i < SETTINGS_N; i++) items[i] = buf[i];
     book_from_menu(&a->book, &a->geo, "设置", "点一行修改", items, SETTINGS_N);
 }
@@ -1594,22 +1595,48 @@ static void settings_action(App *a, int line_index) {
             app_draw(a, NULL);
             break;
         }
-        case 2: toggle_theme(a); break;
-        case 3:
+        case 2: {
+            /* toggle font: reading (Song + mono) <-> classic Unifont */
+            font_free(&a->font);
+            const char *base = a->cfg.font_file;
+            const char *other = strstr(base, "reading")
+                ? (strstr(base, "/mnt/us/") ? "/mnt/us/hipda/fonts/unifont.bin"
+                                            : "fonts/unifont.bin")
+                : (strstr(base, "/mnt/us/") ? "/mnt/us/hipda/fonts/reading.bin"
+                                            : "fonts/reading.bin");
+            if (font_load(&a->font, other) == 0) {
+                str_copy(a->cfg.font_file, sizeof(a->cfg.font_file), other);
+                config_save(&a->cfg);
+                log_msg("font switched to %s", other);
+            } else {
+                /* keep the old font usable */
+                const char *back = strstr(base, "reading")
+                    ? "fonts/reading.bin" : "fonts/unifont.bin";
+                font_load(&a->font, back);
+                app_draw(a, "字体文件缺失，已保留原字体");
+                return;
+            }
+            snap_invalidate_all(a);   /* wrapped pages must be re-laid out */
+            build_settings_book(a);
+            app_draw(a, NULL);
+            break;
+        }
+        case 3: toggle_theme(a); break;
+        case 4:
             a->cfg.refresh_mode = (a->cfg.refresh_mode + 1) % 4;
             ui_set_refresh_mode(a->cfg.refresh_mode);
             config_save(&a->cfg);
             build_settings_book(a);
             app_draw(a, NULL);
             break;
-        case 4:
+        case 5:
             a->cfg.full_refresh_every = a->cfg.full_refresh_every >= 12 ? 3
                                        : a->cfg.full_refresh_every + 3;
             config_save(&a->cfg);
             build_settings_book(a);
             app_draw(a, NULL);
             break;
-        case 5: {
+        case 6: {
             /* rotation: 0 -> 90 -> 180 -> 270 -> 0, rebuild everything that
              * depends on geometry (canvas, snapshots, selection) */
             a->cfg.rotation = (a->cfg.rotation + 90) % 360;
@@ -1622,16 +1649,16 @@ static void settings_action(App *a, int line_index) {
             app_draw(a, NULL);
             break;
         }
-        case 6:
+        case 7:
             a->cfg.img_mode = a->cfg.img_mode ? 0 : 1;
             config_save(&a->cfg);
             snap_invalidate_all(a);   /* placeholders re-render per mode */
             build_settings_book(a);
             app_draw(a, NULL);
             break;
-        case 7: show_login(a); break;
-        case 8: show_calib(a); break;
-        case 9: {
+        case 8: show_login(a); break;
+        case 9: show_calib(a); break;
+        case 10: {
             int n = cache_clear(a->cfg.cache_dir);
             snap_invalidate_all(a);
             log_msg("cache: cleared %d file(s) from %s", n, a->cfg.cache_dir);
@@ -1645,7 +1672,7 @@ static void settings_action(App *a, int line_index) {
             a->view_before_msg = V_SETTINGS;
             break;
         }
-        case 10: show_menu_view(a); break;
+        case 11: show_menu_view(a); break;
         default: break;
     }
 }

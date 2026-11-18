@@ -138,11 +138,10 @@ int book_from_forums(Book *b, const Geometry *g, const Config *cfg) {
         const Forum *f = forum_by_fid(fid);
         if (!f) continue;
         char row[HIPDA_NAME_LEN];
-        /* one line per forum, plus a blank line between entries: bigger touch
-         * targets matter more than density on a 6" e-ink screen */
+        /* one tight row per forum: line_h already carries touch padding, so
+         * no extra blank line — denser lists mean fewer e-ink page flips. */
         snprintf(row, sizeof(row), "· %s", f->name);
         book_wrap_text(b, g, L_ITEM, row, 0, fid, 1);
-        book_add_line(b, L_BLANK, "", 0, 0, 1);
     }
     book_finalize(b, g);
     return b->n;

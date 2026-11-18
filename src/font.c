@@ -28,6 +28,20 @@ int font_load(Font *f, const char *path) {
         font_free(f);
         return -1;
     }
+    /* Pre-index ASCII: it dominates UI + mixed Latin text, so a direct lookup
+     * avoids ~16 binary-search comparisons per character on every repaint. */
+    for (int cp = 0; cp < 128; cp++) {
+        uint32_t lo = 0, hi = f->count;
+        while (lo < hi) {
+            uint32_t m = lo + (hi - lo) / 2;
+            const uint8_t *r = f->records + (size_t)m * f->rec_size;
+            uint32_t v; memcpy(&v, r, 4);
+            if (v == (uint32_t)cp) { f->ascii[cp] = r + 4; break; }
+            if (v < (uint32_t)cp) lo = m + 1; else hi = m;
+        }
+    }
+    f->last_cp = 0xFFFFFFFFu;
+    f->last_glyph = NULL;
     log_msg("font: %s -> %u glyphs, %zu bytes", path, f->count, f->size);
     return 0;
 }
@@ -35,15 +49,20 @@ void font_free(Font *f) { free(f->blob); memset(f, 0, sizeof(*f)); }
 
 const uint8_t *font_glyph(Font *f, uint32_t cp) {
     if (!f->records) return NULL;
+    if (cp < 128) return f->ascii[cp];          /* O(1) ASCII */
+    if (cp == f->last_cp) return f->last_glyph; /* repeated glyph run */
     uint32_t lo = 0, hi = f->count;
+    const uint8_t *found = NULL;
     while (lo < hi) {
         uint32_t m = lo + (hi - lo) / 2;
         const uint8_t *r = f->records + (size_t)m * f->rec_size;
         uint32_t v; memcpy(&v, r, 4);
-        if (v == cp) return r + 4;
+        if (v == cp) { found = r + 4; break; }
         if (v < cp) lo = m + 1; else hi = m;
     }
-    return NULL;
+    f->last_cp = cp;
+    f->last_glyph = found;
+    return found;
 }
 
 static void draw_glyph(Font *f, Canvas *c, int x, int y, uint32_t cp,
@@ -57,13 +76,39 @@ static void draw_glyph(Font *f, Canvas *c, int x, int y, uint32_t cp,
     }
     int maxcol = cells * 8;
     if (maxcol > 16) maxcol = 16;
+    /* Render source pixel rows into the canvas. Coordinates are inside the
+     * canvas (the layout guarantees it), so we write directly instead of
+     * paying for canvas_rect's per-call clipping. Consecutive set bits on a
+     * row are merged into one memset — a glyph is mostly horizontal runs. */
     for (int row = 0; row < 16; row++) {
         uint16_t bits = (uint16_t)((bmp[row * 2] << 8) | bmp[row * 2 + 1]);
         if (!bits) continue;
-        for (int col = 0; col < maxcol; col++) {
-            if (!(bits & (uint16_t)(0x8000u >> col))) continue;
-            if (scale == 1) canvas_pixel(c, x + col, y + row, ink);
-            else canvas_rect(c, x + col * scale, y + row * scale, scale, scale, ink);
+        int yy = y + row * scale;
+        if (yy < 0 || yy >= c->h) continue;
+        if (scale == 1) {
+            uint8_t *dst = c->px + (size_t)yy * c->w;
+            for (int col = 0; col < maxcol; col++)
+                if (bits & (uint16_t)(0x8000u >> col) &&
+                    x + col >= 0 && x + col < c->w)
+                    dst[x + col] = ink;
+        } else {
+            int col = 0;
+            while (col < maxcol) {
+                if (!(bits & (uint16_t)(0x8000u >> col))) { col++; continue; }
+                int start = col;
+                while (col < maxcol && (bits & (uint16_t)(0x8000u >> col))) col++;
+                /* run [start, col) -> one horizontal block, scale rows tall */
+                int bx = x + start * scale;
+                int bw = (col - start) * scale;
+                if (bx < 0) { bw += bx; bx = 0; }
+                if (bx + bw > c->w) bw = c->w - bx;
+                if (bw > 0) {
+                    int y1 = yy + scale;
+                    if (y1 > c->h) y1 = c->h;
+                    for (int ry = yy; ry < y1; ry++)
+                        memset(c->px + (size_t)ry * c->w + bx, ink, (size_t)bw);
+                }
+            }
         }
     }
 }

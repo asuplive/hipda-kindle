@@ -49,8 +49,9 @@ def main() -> int:
     manifest = json.load(open(mpath, encoding="utf-8"))
     src = os.path.join(ROOT, manifest["binary"])
     font = os.path.join(ROOT, "fonts", "unifont.bin")
+    reading_font = os.path.join(ROOT, "fonts", "reading.bin")
     readme = os.path.join(ROOT, "README.md")
-    for p in (src, font, readme):
+    for p in (src, font, reading_font, readme):
         if not os.path.exists(p):
             print("missing", p, file=__import__("sys").stderr)
             return 2
@@ -69,12 +70,13 @@ def main() -> int:
                 continue
             full = os.path.join(base, n)
             rel = os.path.relpath(full, PKG).replace("\\", "/")
-            if rel in ("bin/hipda", "fonts/unifont.bin"):
+            if rel in ("bin/hipda", "fonts/unifont.bin", "fonts/reading.bin"):
                 continue          # stale copies; the fresh ones are appended below
             files.append((full, rel))
     files.append((cfg_source, "config.ini"))   # newest credentials, if generated
     files.append((src, "bin/hipda"))           # the freshly linked binary
     files.append((font, "fonts/unifont.bin"))
+    files.append((reading_font, "fonts/reading.bin"))
     files.append((readme, "README.md"))
     files.sort(key=lambda x: x[1])
 
@@ -93,6 +95,7 @@ def main() -> int:
          sha256(os.path.join(ROOT, manifest["lib"])) if
          os.path.exists(os.path.join(ROOT, manifest.get("lib", ""))) else "n/a"),
         ("unifont.bin (font)", sha256(font)),
+        ("reading.bin (font)", sha256(reading_font)),
     ]
     sums = [s for s in sums if s[1] != "n/a"]
     sums_path = os.path.join(BUILD, "SHA256SUMS_%d.txt" % seq)

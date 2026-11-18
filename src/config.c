@@ -21,12 +21,12 @@ void config_defaults(Config *c, int pc_build) {
     c->nforums = 0;                 /* 0 = use the full built-in catalog */
     if (pc_build) {
         str_copy(c->config_path, sizeof(c->config_path), "config.ini");
-        str_copy(c->font_file, sizeof(c->font_file), "fonts/unifont.bin");
+        str_copy(c->font_file, sizeof(c->font_file), "fonts/reading.bin");
         str_copy(c->cache_dir, sizeof(c->cache_dir), ".cache/http");
         str_copy(c->cookie_file, sizeof(c->cookie_file), ".cache/cookies.txt");
     } else {
         str_copy(c->config_path, sizeof(c->config_path), "/mnt/us/hipda/config.ini");
-        str_copy(c->font_file, sizeof(c->font_file), "/mnt/us/hipda/fonts/unifont.bin");
+        str_copy(c->font_file, sizeof(c->font_file), "/mnt/us/hipda/fonts/reading.bin");
         str_copy(c->cache_dir, sizeof(c->cache_dir), "/mnt/us/hipda/cache");
         str_copy(c->cookie_file, sizeof(c->cookie_file), "/mnt/us/hipda/cookies.txt");
     }
