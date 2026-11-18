@@ -124,24 +124,53 @@ void book_finalize(Book *b, const Geometry *g) {
     }
 }
 
+/* Forum home, curated 2026-11-18 per the current board list. Order matters:
+ * Discovery and Buy & Sell get the most traffic and lead the page; the rest
+ * follow in reading order. Each section is a bold title over a smaller,
+ * fainter description line (tapping either opens the board — the desc row
+ * has item_id 0 and hit-testing falls through to the title above it). */
+static const struct {
+    int         fid;
+    const char *name;
+    const char *desc;
+} kHomeForums[] = {
+    { 2,  "Discovery",                  NULL },
+    { 6,  "Buy & Sell 交易服务区",       "最IN数码产品热卖场，易手产品交易区，Hot!" },
+    { 0,  NULL, NULL },                 /* separator: hot boards above */
+    { 7,  "Geek Talks · 奇客怪谈",       "业界、Bluetooth、WiFi、嵌入Linux、看法、非主流设备。" },
+    { 9,  "Smartphone",                 "智能手机：Windows Mobile/Windows Phone, Android, iOS, webOS, Symbian, and other" },
+    { 56, "iPhone, iPod Touch，iPad",   "可以用两根手指头同时摸的手机和上网设备" },
+    { 60, "Android, Chrome, & Google",  "Cloud Computing of Titan" },
+    { 12, "PalmOS，Treo",               "PalmOS的各种软件、硬件，Treo手机" },
+    { 22, "麦客爱苹果",                  "G4，Powerbook，iMac，iPod，OS X...Think Different，Live Elegant" },
+    { 14, "Windows Mobile，PocketPC，HPC", "WinCE/PPC上的各种硬件评测，软件使用，选择，比较，问题与解答。" },
+    { 50, "DC,NB,MP3,Gadgets...",       "笔记本电脑、数码相机、MP3，各种电子玩具、游戏机" },
+    { 24, "意欲蔓延",                    "电影、音乐、读书、美术、摄影、English" },
+    { 23, "随笔与个人文集",              "在岁月的书签上，留下我的痕迹" },
+    { 25, "吃喝玩乐",                    "美食、旅行~~~" },
+    { 51, "La Femme",                   "三月三日天气新，HP里多丽人" },
+};
+
 int book_from_forums(Book *b, const Geometry *g, const Config *cfg) {
+    (void)cfg;                            /* home layout is curated above */
     book_reset(b);
     str_copy(b->title, sizeof(b->title), "HiPDA 论坛");
     str_copy(b->subtitle, sizeof(b->subtitle), "选择板块");
     b->fid = 0; b->tid = 0;
     /* The page header already shows b->title; do not repeat it in the body. */
-    book_wrap_text(b, g, L_NOTE, "点条目进入 · 左上角 Hi 菜单", 0, 0, 1);
+    book_wrap_text(b, g, L_NOTE, "点板块名进入 · 左上角 Hi 菜单", 0, 0, 1);
     book_add_line(b, L_BLANK, "", 0, 0, 1);
-    int count = cfg->nforums > 0 ? cfg->nforums : kForumsCount;
-    for (int i = 0; i < count; i++) {
-        int fid = cfg->nforums > 0 ? cfg->forums[i] : kForums[i].fid;
-        const Forum *f = forum_by_fid(fid);
-        if (!f) continue;
+    for (unsigned i = 0; i < sizeof(kHomeForums) / sizeof(kHomeForums[0]); i++) {
+        if (!kHomeForums[i].name) {       /* separator between groups */
+            book_add_line(b, L_BLANK, "", 0, 0, 1);
+            book_add_line(b, L_SEP, "", 0, 0, 1);
+            continue;
+        }
         char row[HIPDA_NAME_LEN];
-        /* one tight row per forum: line_h already carries touch padding, so
-         * no extra blank line — denser lists mean fewer e-ink page flips. */
-        snprintf(row, sizeof(row), "· %s", f->name);
-        book_wrap_text(b, g, L_ITEM, row, 0, fid, 1);
+        snprintf(row, sizeof(row), "· %s", kHomeForums[i].name);
+        book_add_line(b, L_FTITLE, row, 0, kHomeForums[i].fid, 1);
+        if (kHomeForums[i].desc && kHomeForums[i].desc[0])
+            book_wrap_text(b, g, L_FDESC, kHomeForums[i].desc, 1, 0, 1);
     }
     book_finalize(b, g);
     return b->n;
@@ -270,6 +299,8 @@ static const char *kind_name(LineKind k) {
         case L_CTRL:  return "ctrl";
         case L_BTN:   return "btn";
         case L_IMGPH: return "imgph";
+        case L_FTITLE: return "ftitle";
+        case L_FDESC: return "fdesc";
         default:      return "blank";
     }
 }

@@ -245,6 +245,28 @@ void render_page(Canvas *c, Font *font, const Geometry *g, const Book *b,
                 font_draw_text(font, c, bx + 5 * scale, y, l->text, scale,
                                ink(theme, INK_BLACK), 1);
             }
+        } else if (l->kind == L_FTITLE || l->kind == L_FDESC) {
+            /* forum home: bold section title over a smaller, fainter
+             * description. Both invert on press; the title also inverts
+             * when keyboard-selected. */
+            int dscale = (l->kind == L_FDESC && scale > 1) ? scale - 1 : scale;
+            int press = (i == press_line);
+            int sel = (i == sel_line && l->kind == L_FTITLE);
+            uint8_t col = (l->kind == L_FDESC) ? ink(theme, INK_GRAY)
+                                               : ink(theme, INK_BLACK);
+            /* small desc sits vertically centred in the row */
+            int dy = y + (g->cell_h - 16 * dscale) / 2;
+            if (dy < y) dy = y;
+            if (press || sel) {
+                canvas_rect(c, mx - scale, y - scale, right - mx + 2 * scale,
+                            g->cell_h + 2 * scale, ink(theme, INK_BLACK));
+                font_draw_text(font, c, x, dy, l->text ? l->text : "", dscale,
+                               ink(theme, INK_WHITE),
+                               l->kind == L_FTITLE);
+            } else {
+                font_draw_text(font, c, x, dy, l->text ? l->text : "", dscale,
+                               col, l->kind == L_FTITLE);
+            }
         } else if (i == press_line && l->text && l->text[0]) {
             /* finger is on this row right now: invert it so the touch is
              * visibly acknowledged even on a slow e-ink screen */

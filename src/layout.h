@@ -19,7 +19,9 @@ typedef enum {
     L_CTRL,        /* keyboard control row: Sh/Pg/Space/Back/Enter/Cancel */
     L_BTN,         /* wide centred button ("登 录") */
     L_IMGPH,       /* image placeholder row; item_id = URL hash */
-    L_CAND         /* pinyin candidate row: up to 8 boxed UTF-8 chars */
+    L_CAND,        /* pinyin candidate row: up to 8 boxed UTF-8 chars */
+    L_FTITLE,      /* forum-home section title: bold, item_id = fid */
+    L_FDESC        /* forum-home description: small + faint, item_id = 0 */
 } LineKind;
 
 /* Keyboard geometry contract shared by painter and hit-test:
