@@ -1927,7 +1927,7 @@ static void move_sel(App *a, int dir) {
 static int line_from_y(App *a, int y) {
     if (a->geo.line_h <= 0 || a->book.np <= 0) return -1;
     if (a->page_index < 0 || a->page_index >= a->book.np) return -1;
-    int row = (y - (a->geo.margin_y + a->geo.line_h)) / a->geo.line_h;
+    int row = (y - (a->geo.top_h + a->geo.line_h)) / a->geo.line_h;
     const Page *pg = &a->book.pages[a->page_index];
     if (row < 0 || row >= pg->count) return -1;
     return row;
@@ -1951,7 +1951,7 @@ static Action map_tap(App *a, const InputEvent *ev, int *line_index) {
      * otherwise the left edge would steal taps meant for the keyboard. */
     if (a->view == V_LOGIN || a->view == V_MENU || a->view == V_SETTINGS) {
         if (y > h * 90 / 100) return ACT_BACK;
-        int row = (y - (a->geo.margin_y + a->geo.line_h)) / a->geo.line_h;
+        int row = (y - (a->geo.top_h + a->geo.line_h)) / a->geo.line_h;
         *line_index = row;
         return ACT_SELECT;
     }
@@ -1959,7 +1959,7 @@ static Action map_tap(App *a, const InputEvent *ev, int *line_index) {
     /* Tap-to-turn: a tap on a real entry always wins, otherwise the outer
      * thirds of the screen turn pages (Kindle's own habit). Swipe page-turning
      * is disabled — it forced a full e-ink refresh mid-gesture and felt frozen. */
-    int row = (y - (a->geo.margin_y + a->geo.line_h)) / a->geo.line_h;
+    int row = (y - (a->geo.top_h + a->geo.line_h)) / a->geo.line_h;
     if (row >= 0 && hit_item_line(a, row) >= 0) {
         *line_index = row;
         return ACT_SELECT;
