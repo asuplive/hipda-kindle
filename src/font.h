@@ -4,7 +4,7 @@
 #include "hipda.h"
 #include "raster.h"
 
-typedef struct {
+typedef struct Font {
     uint8_t *blob;             /* whole HUF1 file, kept mapped in RAM */
     size_t   size;
     uint32_t count;
@@ -15,6 +15,10 @@ typedef struct {
     const uint8_t *ascii[128];
     uint32_t   last_cp;
     const uint8_t *last_glyph;
+    /* Optional separate ASCII/Latin font. When set, codepoints < 0x100 are
+     * looked up here instead of in the main (CJK) font. Owned by the caller,
+     * never freed by font_free(). */
+    struct Font *ascii_src;
 } Font;
 
 int  font_load(Font *f, const char *path);

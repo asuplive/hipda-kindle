@@ -11,7 +11,9 @@
  * so every UI element can match the SVG mockup type scale exactly. */
 
 int font_load(Font *f, const char *path) {
+    Font *ascii_src = f->ascii_src;   /* preserve a linked ASCII font */
     memset(f, 0, sizeof(*f));
+    f->ascii_src = ascii_src;
     Str raw; str_init(&raw);
     if (file_read(path, &raw) || raw.len < 20 || memcmp(raw.data, "HUF1", 4)) {
         log_msg("font: cannot load %s (bad or missing HUF1 file)", path);
@@ -61,6 +63,9 @@ void font_free(Font *f) { free(f->blob); memset(f, 0, sizeof(*f)); }
 
 const uint8_t *font_glyph(Font *f, uint32_t cp) {
     if (!f->records) return NULL;
+    /* ASCII/Latin may come from a dedicated font (user-selectable in Settings) */
+    if (cp < 0x100 && f->ascii_src && f->ascii_src != f)
+        return font_glyph(f->ascii_src, cp);
     if (cp < 128) return f->ascii[cp];          /* O(1) ASCII */
     if (cp == f->last_cp) return f->last_glyph; /* repeated glyph run */
     uint32_t lo = 0, hi = f->count;

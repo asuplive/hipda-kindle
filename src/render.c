@@ -64,9 +64,17 @@ static void footer_btn_rect(const Geometry *g, int which,
     if (which == 0)      *bx = g->margin_x;
     else if (which == 1) *bx = g->margin_x + span * 118 / 536;
     else                 *bx = right - wback;
-    *by = fy;
-    *bw = (which == 2) ? wback : wlabel;
-    *bh = g->h - fy;
+    int foot_h = g->h - fy;
+    int box_h = 32 * g->h / 800;               /* SVG 32px @800 */
+    if (which == 2) {
+        *by = fy + (foot_h - box_h) / 2;        /* boxed 返回, centred */
+        *bw = wback;
+        *bh = box_h;
+    } else {
+        *by = fy;                               /* text hit strips */
+        *bw = wlabel;
+        *bh = foot_h;
+    }
 }
 
 int render_footer_btn_hit(const Geometry *g, int x, int y) {
@@ -324,26 +332,31 @@ void render_page(Canvas *c, Font *font, const Geometry *g, const Book *b,
                 font_draw_text(font, c, tx, sy, l->text, th_sub, s_col, 0);
             }
         } else if (l->kind == L_NUM) {
-            /* numbered row: "NN" + title + chevron, inverts on select */
+            /* SVG 07-settings: numbered card, 50px @600 (~2 rows), thin frame
+             * + thick left bar; selected/pressed inverts the whole card. */
             int pressed = (i == press_line);
             int selected = (i == sel_line);
-            int hh = lh - 2 * scale;
+            int gap = 6 * g->w / 600;            /* SVG card gap */
+            int hh = 2 * lh - gap;
+            int top = y - scale;
             if (pressed || selected) {
-                canvas_rect(c, mx - scale, y - scale, span + 2 * scale,
-                            hh + 2 * scale, ink(theme, INK_BLACK));
+                canvas_rect(c, mx, top, span, hh, ink(theme, INK_BLACK));
             } else {
-                canvas_hline(c, mx, y + hh, span,
-                             ink(theme, INK_FAINT), scale > 1 ? 2 : 1);
+                canvas_frame(c, mx, top, span, hh, ink(theme, INK_BLACK),
+                             scale > 1 ? 2 : 1);
+                canvas_rect(c, mx, top, 3 * scale, hh, ink(theme, INK_BLACK));
             }
             uint8_t col = (pressed || selected) ? ink(theme, INK_WHITE)
                                                 : ink(theme, INK_BLACK);
+            int vcy = top + (hh - th_title) / 2;
+            if (vcy < y) vcy = y;
             const char *t = l->text ? l->text : "";
             char num[3] = { t[0], t[1], 0 };
-            font_draw_text(font, c, x + 8 * g->w / 600, y, num,
+            font_draw_text(font, c, x + 20 * g->w / 600, vcy, num,
                            th_body * 17 / 16, col, 1);
-            font_draw_text(font, c, x + 72 * g->w / 600, y, t + 3,
+            font_draw_text(font, c, x + 72 * g->w / 600, vcy, t + 3,
                            th_title, col, 1);
-            font_draw_text(font, c, right - 12 * g->w / 600, y, "›",
+            font_draw_text(font, c, right - 12 * g->w / 600, vcy, "›",
                            th_title, col, 0);
         } else if (l->kind == L_FTITLE || l->kind == L_FDESC) {
             int th = (l->kind == L_FDESC) ? th_sub : th_title;
@@ -413,7 +426,8 @@ void render_page(Canvas *c, Font *font, const Geometry *g, const Book *b,
     footer_btn_rect(g, 2, &bx, &by, &bw, &bh);
     canvas_frame(c, bx, by, bw, bh, ink(theme, INK_BLACK), scale > 1 ? 2 : 1);
     int tw = font_text_width(font, "返回", th_foot);
-    font_draw_text(font, c, bx + (bw - tw) / 2, fty, "返回", th_foot,
+    int bty = by + (bh - th_foot) / 2;
+    font_draw_text(font, c, bx + (bw - tw) / 2, bty, "返回", th_foot,
                    ink(theme, INK_BLACK), 0);
 
     if (flash_msg && flash_msg[0]) {

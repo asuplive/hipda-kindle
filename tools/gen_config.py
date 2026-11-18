@@ -24,7 +24,8 @@ username={user}
 password_md5={md5}
 
 cookie_file=/mnt/us/extensions/hipda/cookies.txt
-font_file=/mnt/us/extensions/hipda/fonts/reading.bin
+font_file=/mnt/us/extensions/hipda/fonts/cn_song.bin
+font_en=/mnt/us/extensions/hipda/fonts/en_consolas.bin
 cache_dir=/mnt/us/extensions/hipda/cache
 
 net_cmd=curl

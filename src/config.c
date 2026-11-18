@@ -21,12 +21,14 @@ void config_defaults(Config *c, int pc_build) {
     c->nforums = 0;                 /* 0 = use the full built-in catalog */
     if (pc_build) {
         str_copy(c->config_path, sizeof(c->config_path), "config.ini");
-        str_copy(c->font_file, sizeof(c->font_file), "fonts/reading.bin");
+        str_copy(c->font_file, sizeof(c->font_file), "fonts/cn_song.bin");
+        str_copy(c->font_en, sizeof(c->font_en), "fonts/en_consolas.bin");
         str_copy(c->cache_dir, sizeof(c->cache_dir), ".cache/http");
         str_copy(c->cookie_file, sizeof(c->cookie_file), ".cache/cookies.txt");
     } else {
         str_copy(c->config_path, sizeof(c->config_path), "/mnt/us/hipda/config.ini");
-        str_copy(c->font_file, sizeof(c->font_file), "/mnt/us/hipda/fonts/reading.bin");
+        str_copy(c->font_file, sizeof(c->font_file), "/mnt/us/extensions/hipda/fonts/cn_song.bin");
+        str_copy(c->font_en, sizeof(c->font_en), "/mnt/us/extensions/hipda/fonts/en_consolas.bin");
         str_copy(c->cache_dir, sizeof(c->cache_dir), "/mnt/us/hipda/cache");
         str_copy(c->cookie_file, sizeof(c->cookie_file), "/mnt/us/hipda/cookies.txt");
     }
@@ -64,6 +66,7 @@ int config_load(Config *c, const char *path) {
         else if (str_caseeq(key, "password_md5")) set_str(val, c->password_md5, sizeof(c->password_md5));
         else if (str_caseeq(key, "cookie_file"))  set_str(val, c->cookie_file, sizeof(c->cookie_file));
         else if (str_caseeq(key, "font_file"))    set_str(val, c->font_file, sizeof(c->font_file));
+        else if (str_caseeq(key, "font_en"))      set_str(val, c->font_en, sizeof(c->font_en));
         else if (str_caseeq(key, "cache_dir"))    set_str(val, c->cache_dir, sizeof(c->cache_dir));
         else if (str_caseeq(key, "net_cmd"))      set_str(val, c->net_cmd, sizeof(c->net_cmd));
         else if (str_caseeq(key, "user_agent"))   set_str(val, c->user_agent, sizeof(c->user_agent));
@@ -118,6 +121,7 @@ int config_save(const Config *c) {
     fprintf(f, "password_md5=%s\n", c->password_md5);
     fprintf(f, "cookie_file=%s\n", c->cookie_file);
     fprintf(f, "font_file=%s\n", c->font_file);
+    fprintf(f, "font_en=%s\n", c->font_en);
     fprintf(f, "cache_dir=%s\n", c->cache_dir);
     fprintf(f, "net_cmd=%s\n", c->net_cmd);
     fprintf(f, "user_agent=%s\n", c->user_agent);

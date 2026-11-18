@@ -111,11 +111,26 @@ KUAL menu.json
 | 10 | 切换主题 | 白底黑字 ↔ 黑底白字，立即生效并写回 config.ini |
 | 11 | **退出应用** | 明确退出，触摸交还系统 |
 
-**字体**：内置两套点阵字体，设置页「字体」一行点按切换，**即时生效**：
-- **阅读体**（默认）：中文宋体（SimSun 16×16，有笔锋、长时间阅读不累），英文 Consolas 8×16（饱满等宽），其余符号沿用 GNU Unifont 补全。适合整页阅读。
-- **Unifont**：GNU Unifont 经典点阵，笔画更硬朗，老机型上更"脆"。
+**字体（中英文分开，可自定义）**：设置页有「中文字体」「英文字体」两行，点按即在 `fonts/` 目录里所有 `.bin` 字体之间循环，**即时生效**：
 
-也可以在 `config.ini` 里写 `font_file=` 指向任意 HUF1 字体文件来自定义（`tools/gen_font.py` / `tools/gen_reading_font.py` 可从 `.hex` 或系统字体生成）。字号在「字号」一项设 自动/小/中/大。
+内置字体：
+- **中文**：宋体（标准，默认）、黑体、楷体、雅黑、Unifont 经典点阵
+- **英文**：Consolas 等宽（默认）、Arial 无衬线、Unifont 点阵
+
+所有字体都是 32px 高清点阵（`HUF1` 格式），工具有中文字形全集 6763 字，英文按字符宽度渲染，长文阅读清晰。设置页「字号」可设 自动/小/中/大。
+
+**导入自己的字体**：把任意 `.ttf/.otf/.ttc` 转成 HUF1 放进 `fonts/` 即可在设置页里选到：
+
+```bash
+# 中文字体（含 GB2312 全集，约 1MB）
+python tools/import_font.py C:/Windows/Fonts/simfang.ttf fonts/cn_fang.bin --cjk-only --label 仿宋
+# 英文字体（仅 ASCII/拉丁，约 68KB）
+python tools/import_font.py C:/Windows/Fonts/georgia.ttf fonts/en_georgia.bin --ascii-only --label Georgia
+# 中西文都包含的完整字体
+python tools/import_font.py MyFont.ttf fonts/myfont.bin --cjk --label MyFont
+```
+
+转换后把 `.bin` 拷到 Kindle 的 `extensions/hipda/fonts/` 下，设置页即可切换。也可以在 `config.ini` 里直接写 `font_file=`（中文）和 `font_en=`（英文）指定路径。
 
 **缓存策略**：所有列表和帖子命中本机缓存时**直接显示**，不闪加载页；没缓存的帖子走异步拉取、拉完再显示，并自动写入缓存；只有点右上角刷新圆圈才强制联网拉取最新内容。
 

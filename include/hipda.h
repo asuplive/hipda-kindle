@@ -68,7 +68,8 @@ typedef struct {
     char username[HIPDA_SHORT_LEN];
     char password_md5[64];
     char cookie_file[HIPDA_PATH_LEN];
-    char font_file[HIPDA_PATH_LEN];
+    char font_file[HIPDA_PATH_LEN];   /* Chinese / main font */
+    char font_en[HIPDA_PATH_LEN];     /* ASCII / Latin font (optional) */
     char cache_dir[HIPDA_PATH_LEN];
     char config_path[HIPDA_PATH_LEN];
     char net_cmd[32];

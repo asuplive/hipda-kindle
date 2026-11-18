@@ -53,7 +53,7 @@ static const char *kMenuItems[] = {
 #define MENU_THEME      10
 #define MENU_QUIT       11
 
-#define SETTINGS_N 11
+#define SETTINGS_N 12
 
 /* On-screen keyboard, three pages: lower-case, upper-case, digits/symbols.
  * Each key takes 3 cells (character + 2 blanks) so the keys are far enough
@@ -100,7 +100,8 @@ typedef struct {
 
 typedef struct {
     Config   cfg;
-    Font     font;
+    Font     font;                    /* Chinese font (main) */
+    Font     font_en;                 /* English/ASCII font, linked via ascii_src */
     Canvas   canvas;
     Geometry geo;
     UiInfo   ui;
@@ -1262,6 +1263,101 @@ static void build_search_book(App *a) {
     build_input_book(a, "搜索帖子", f0, f1, 2, "搜  索");
 }
 
+/* Friendly name for a HUF font file, used in Settings. */
+static const char *font_label(const char *path) {
+    if (strstr(path, "song"))    return "宋体（标准）";
+    if (strstr(path, "hei"))     return "黑体（标准）";
+    if (strstr(path, "kai"))     return "楷体（标准）";
+    if (strstr(path, "yhei"))    return "雅黑（标准）";
+    if (strstr(path, "consol"))  return "Consolas（等宽）";
+    if (strstr(path, "arial"))   return "Arial（无衬线）";
+    if (strstr(path, "unifont")) return "Unifont（点阵）";
+    if (strstr(path, "reading")) return "宋体+等宽（旧版）";
+    const char *slash = strrchr(path, '/');
+    return slash ? slash + 1 : path;      /* custom font: show file name */
+}
+
+/* Directory that holds the .bin font files, derived from the active font path. */
+static void font_dir(const App *a, char *out, size_t cap) {
+    const char *base = a->cfg.font_file[0] ? a->cfg.font_file : "fonts/cn_song.bin";
+    const char *slash = strrchr(base, '/');
+    if (!slash) { str_copy(out, cap, "fonts"); return; }
+    size_t n = (size_t)(slash - base);
+    if (n >= cap) n = cap - 1;
+    memcpy(out, base, n);
+    out[n] = 0;
+}
+
+/* Cycle to the next available .bin font in `dir`. Returns 1 on success.
+ * which: 0 = Chinese (a->font), 1 = English (a->font_en). */
+static int font_cycle(App *a, int which) {
+    char dir[HIPDA_PATH_LEN], cur[HIPDA_PATH_LEN];
+    font_dir(a, dir, sizeof(dir));
+    char *target = which ? a->cfg.font_en : a->cfg.font_file;
+    str_copy(cur, sizeof(cur), target);
+
+    /* Small fixed list of built-ins first; custom *.bin are appended by the
+     * directory scan below. Build a stable, sorted-enough name list. */
+    static const char *const builtin[] = {
+        "cn_song.bin", "cn_hei.bin", "cn_kai.bin", "cn_yhei.bin", "unifont.bin"
+    };
+    static const char *const builtin_en[] = {
+        "en_consolas.bin", "en_arial.bin", "unifont.bin", ""
+    };
+    const char *const *list = which ? builtin_en : builtin;
+    int nlist = which ? 4 : 5;
+    char paths[24][HIPDA_PATH_LEN];
+    int n = 0;
+    for (int i = 0; i < nlist && n < 24; i++) {
+        snprintf(paths[n], sizeof(paths[n]), "%s/%s", dir, list[i]);
+        if (file_exists(paths[n])) n++;
+    }
+    /* append any extra *.bin the user dropped into fonts/ */
+    DIR *d = opendir(dir);
+    if (d) {
+        struct dirent *de;
+        while ((de = readdir(d)) && n < 24) {
+            size_t ln = strlen(de->d_name);
+            if (ln < 5 || strcmp(de->d_name + ln - 4, ".bin")) continue;
+            int dup = 0;
+            for (int i = 0; i < n; i++) {
+                const char *slash = strrchr(paths[i], '/');
+                if (slash && !strcmp(slash + 1, de->d_name)) { dup = 1; break; }
+            }
+            if (!dup) snprintf(paths[n++], sizeof(paths[n]), "%s/%s", dir, de->d_name);
+        }
+        closedir(d);
+    }
+    if (n == 0) return 0;
+    int at = 0;
+    for (int i = 0; i < n; i++)
+        if (!strcmp(paths[i], cur)) { at = i; break; }
+    const char *next = paths[(at + 1) % n];
+
+    if (which) {
+        Font tmp; memset(&tmp, 0, sizeof(tmp));
+        int ok = (font_load(&tmp, next) == 0 && tmp.records);
+        font_free(&tmp);
+        if (ok) {
+            font_load(&a->font_en, next);
+            a->font.ascii_src = &a->font_en;
+            str_copy(a->cfg.font_en, sizeof(a->cfg.font_en), next);
+        }
+    } else {
+        Font tmp; memset(&tmp, 0, sizeof(tmp));
+        int ok = (font_load(&tmp, next) == 0 && tmp.records);
+        font_free(&tmp);
+        if (ok) {
+            font_load(&a->font, next);   /* preserves ascii_src */
+            str_copy(a->cfg.font_file, sizeof(a->cfg.font_file), next);
+        }
+    }
+    config_save(&a->cfg);
+    snap_invalidate_all(a);
+    log_msg("font: %s -> %s", which ? "EN" : "CN", next);
+    return 1;
+}
+
 static void build_settings_book(App *a) {
     char buf[SETTINGS_N][HIPDA_NAME_LEN];
     const char *items[SETTINGS_N];
@@ -1269,28 +1365,28 @@ static void build_settings_book(App *a) {
                           : a->cfg.font_scale == 1 ? "小"
                           : a->cfg.font_scale == 2 ? "中" : "大";
     snprintf(buf[0], HIPDA_NAME_LEN, "字号：%s", scale_txt);
-    const char *fname = strstr(a->cfg.font_file, "reading")
-                        ? "阅读体（宋体+等宽）" : "Unifont（经典点阵）";
-    snprintf(buf[1], HIPDA_NAME_LEN, "字体：%s", fname);
-    snprintf(buf[2], HIPDA_NAME_LEN, "主题：%s",
+    snprintf(buf[1], HIPDA_NAME_LEN, "中文字体：%s", font_label(a->cfg.font_file));
+    snprintf(buf[2], HIPDA_NAME_LEN, "英文字体：%s",
+             a->cfg.font_en[0] ? font_label(a->cfg.font_en) : "（跟随中文）");
+    snprintf(buf[3], HIPDA_NAME_LEN, "主题：%s",
              a->cfg.theme ? "黑底白字（夜间）" : "白底黑字（日间）");
     static const char *const rm_names[4] = {
         "全刷（最清晰，最慢）", "局部刷（最快，有残影）",
         "Regal（Kindle 特有）", "智能（局部刷N页+全刷）"
     };
-    snprintf(buf[3], HIPDA_NAME_LEN, "刷屏模式：%s",
+    snprintf(buf[4], HIPDA_NAME_LEN, "刷屏模式：%s",
              rm_names[a->cfg.refresh_mode & 3]);
-    snprintf(buf[4], HIPDA_NAME_LEN, "每几页全刷：%d", a->cfg.full_refresh_every);
-    snprintf(buf[5], HIPDA_NAME_LEN, "屏幕旋转：%d°%s",
+    snprintf(buf[5], HIPDA_NAME_LEN, "每几页全刷：%d", a->cfg.full_refresh_every);
+    snprintf(buf[6], HIPDA_NAME_LEN, "屏幕旋转：%d°%s",
              a->cfg.rotation, a->cfg.rotation == 0 ? "（默认）" : "");
-    snprintf(buf[6], HIPDA_NAME_LEN, "图片显示：%s",
+    snprintf(buf[7], HIPDA_NAME_LEN, "图片显示：%s",
              a->cfg.img_mode ? "点按显示（自动缓存）" : "不显示");
-    snprintf(buf[7], HIPDA_NAME_LEN, "登录账号：%s",
+    snprintf(buf[8], HIPDA_NAME_LEN, "登录账号：%s",
              a->cfg.username[0] ? a->cfg.username : "（未登录）");
-    snprintf(buf[8], HIPDA_NAME_LEN, "触摸校准（swap=%d 镜像=%d/%d）",
+    snprintf(buf[9], HIPDA_NAME_LEN, "触摸校准（swap=%d 镜像=%d/%d）",
              a->cfg.cal_swap, a->cfg.cal_flip_x, a->cfg.cal_flip_y);
-    str_copy(buf[9], HIPDA_NAME_LEN, "清理缓存（离线内容与已读页面）");
-    str_copy(buf[10], HIPDA_NAME_LEN, "返回");
+    str_copy(buf[10], HIPDA_NAME_LEN, "清理缓存（离线内容与已读页面）");
+    str_copy(buf[11], HIPDA_NAME_LEN, "返回");
     for (int i = 0; i < SETTINGS_N; i++) items[i] = buf[i];
     book_from_menu(&a->book, &a->geo, "设置", "点一行修改", items, SETTINGS_N);
 }
@@ -1713,52 +1809,30 @@ static void settings_action(App *a, int line_index) {
             app_draw(a, NULL);
             break;
         }
-        case 2: {
-            /* toggle font: reading (Song + mono) <-> classic Unifont.
-             * Build the other path from the CURRENT font's directory so the
-             * switch works no matter where the app is installed. */
-            font_free(&a->font);
-            const char *base = a->cfg.font_file;
-            const char *fname = strstr(base, "reading")
-                                ? "unifont.bin" : "reading.bin";
-            char other[HIPDA_PATH_LEN];
-            const char *slash = strrchr(base, '/');
-            if (slash && slash != base)
-                snprintf(other, sizeof(other), "%.*s/%s",
-                         (int)(slash - base), base, fname);
-            else
-                snprintf(other, sizeof(other), "%s", fname);
-            if (font_load(&a->font, other) == 0) {
-                str_copy(a->cfg.font_file, sizeof(a->cfg.font_file), other);
-                config_save(&a->cfg);
-                log_msg("font switched to %s", other);
-            } else {
-                /* keep the old font usable */
-                font_load(&a->font, base);
-                app_draw(a, "字体文件缺失，已保留原字体");
-                return;
-            }
-            snap_invalidate_all(a);   /* wrapped pages must be re-laid out */
-            build_settings_book(a);
-            app_draw(a, NULL);
+        case 2:                         /* Chinese font */
+            if (!font_cycle(a, 0)) app_draw(a, "没有可用的中文字体");
+            else { build_settings_book(a); app_draw(a, NULL); }
             break;
-        }
-        case 3: toggle_theme(a); break;
-        case 4:
+        case 3:                         /* English font */
+            if (!font_cycle(a, 1)) app_draw(a, "没有可用的英文字体");
+            else { build_settings_book(a); app_draw(a, NULL); }
+            break;
+        case 4: toggle_theme(a); break;
+        case 5:
             a->cfg.refresh_mode = (a->cfg.refresh_mode + 1) % 4;
             ui_set_refresh_mode(a->cfg.refresh_mode);
             config_save(&a->cfg);
             build_settings_book(a);
             app_draw(a, NULL);
             break;
-        case 5:
+        case 6:
             a->cfg.full_refresh_every = a->cfg.full_refresh_every >= 12 ? 3
                                        : a->cfg.full_refresh_every + 3;
             config_save(&a->cfg);
             build_settings_book(a);
             app_draw(a, NULL);
             break;
-        case 6: {
+        case 7: {
             /* rotation: 0 -> 90 -> 180 -> 270 -> 0, rebuild everything that
              * depends on geometry (canvas, snapshots, selection) */
             a->cfg.rotation = (a->cfg.rotation + 90) % 360;
@@ -1771,16 +1845,16 @@ static void settings_action(App *a, int line_index) {
             app_draw(a, NULL);
             break;
         }
-        case 7:
+        case 8:
             a->cfg.img_mode = a->cfg.img_mode ? 0 : 1;
             config_save(&a->cfg);
             snap_invalidate_all(a);   /* placeholders re-render per mode */
             build_settings_book(a);
             app_draw(a, NULL);
             break;
-        case 8: show_login(a); break;
-        case 9: show_calib(a); break;
-        case 10: {
+        case 9: show_login(a); break;
+        case 10: show_calib(a); break;
+        case 11: {
             int n = cache_clear(a->cfg.cache_dir);
             snap_invalidate_all(a);
             log_msg("cache: cleared %d file(s) from %s", n, a->cfg.cache_dir);
@@ -1794,7 +1868,7 @@ static void settings_action(App *a, int line_index) {
             a->view_before_msg = V_SETTINGS;
             break;
         }
-        case 11: show_menu_view(a); break;
+        case 12: show_menu_view(a); break;
         default: break;
     }
 }
@@ -2007,6 +2081,37 @@ static void do_refresh(App *a) {
 
 static void reload(App *a) { do_refresh(a); }
 
+/* Load the Chinese main font and optional English/Latin font. The English
+ * font is linked into a.font.ascii_src so all font_draw_text() calls dispatch
+ * ASCII to it automatically. */
+static void load_fonts(App *a) {
+    a->font.ascii_src = NULL;
+    if (font_load(&a->font, a->cfg.font_file)) {
+        static const char *cands[] = {
+            "/mnt/us/extensions/hipda/fonts/cn_song.bin",
+            "/mnt/us/extensions/hipda/fonts/unifont.bin",
+            "/mnt/us/hipda/fonts/cn_song.bin",
+            "/mnt/us/hipda/fonts/unifont.bin",
+            "fonts/cn_song.bin",
+            "fonts/unifont.bin"
+        };
+        for (unsigned i = 0; i < sizeof(cands) / sizeof(cands[0]); i++) {
+            if (!strcmp(cands[i], a->cfg.font_file)) continue;
+            if (!font_load(&a->font, cands[i])) {
+                log_msg("font: recovered from fallback %s", cands[i]);
+                str_copy(a->cfg.font_file, sizeof(a->cfg.font_file), cands[i]);
+                break;
+            }
+        }
+    }
+    if (a->cfg.font_en[0] && font_load(&a->font_en, a->cfg.font_en) == 0 &&
+        a->font_en.records) {
+        a->font.ascii_src = &a->font_en;
+        log_msg("font: CN '%s' + EN '%s'", a->cfg.font_file, a->cfg.font_en);
+    } else {
+        log_msg("font: CN '%s' only (EN font unavailable)", a->cfg.font_file);
+    }
+}
 static int export_sequence(App *a) {
     pw_begin(a);
     show_forums(a);
@@ -2066,22 +2171,8 @@ int app_run(const AppOptions *opt) {
     log_msg("geometry: %dx%d@%d scale=%d cols=%d rows=%d",
             a.geo.w, a.geo.h, a.geo.dpi, a.geo.scale, a.geo.cols, a.geo.rows);
     if (canvas_init(&a.canvas, a.geo.w, a.geo.h)) return 1;
-    if (font_load(&a.font, a.cfg.font_file)) {
-        static const char *cands[] = {
-            "/mnt/us/extensions/hipda/fonts/unifont.bin",
-            "/mnt/us/hipda/fonts/unifont.bin",
-            "fonts/unifont.bin",
-            "unifont.bin"
-        };
-        for (unsigned i = 0; i < sizeof(cands) / sizeof(cands[0]); i++) {
-            if (!strcmp(cands[i], a.cfg.font_file)) continue;
-            if (!font_load(&a.font, cands[i])) {
-                log_msg("font: recovered from fallback %s", cands[i]);
-                str_copy(a.cfg.font_file, sizeof(a.cfg.font_file), cands[i]);
-                break;
-            }
-        }
-    }
+
+    load_fonts(&a);
     if (!a.font.records) {
         log_msg("FATAL: no usable HUF1 font; draw test pattern instead of blank screen");
         canvas_fill(&a.canvas, 255);
@@ -2265,6 +2356,7 @@ done:
     str_free(&a.img_urls);
     str_free(&a.list_urls);
     canvas_free(&a.canvas);
+    font_free(&a.font_en);
     font_free(&a.font);
     ui_close();
     log_close();

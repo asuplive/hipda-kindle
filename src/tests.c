@@ -318,7 +318,7 @@ static void test_malformed(void) {
 
 static void test_font_raster(void) {
     printf("[font / raster]\n");
-    Font f;
+    Font f; memset(&f, 0, sizeof(f));
     if (font_load(&f, "fonts/unifont.bin") == 0) {
         CHECK(font_glyph(&f, 'A') != NULL, "ASCII glyph present");
         CHECK(font_glyph(&f, 0x4E2D) != NULL, "CJK glyph present");
