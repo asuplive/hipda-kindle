@@ -186,7 +186,7 @@ static const struct {
     const char *name;
     const char *desc;
 } kHomeForums[] = {
-    { 2,  "Discovery",                  NULL },
+    { 2,  "Discovery",                  "发现与分享 · 新主题集散地" },
     { 6,  "Buy & Sell 交易服务区",       "最IN数码产品热卖场，易手产品交易区，Hot!" },
     { 0,  NULL, NULL },                 /* separator: hot boards above */
     { 7,  "Geek Talks · 奇客怪谈",       "业界、Bluetooth、WiFi、嵌入Linux、看法、非主流设备。" },

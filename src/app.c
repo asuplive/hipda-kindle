@@ -1156,6 +1156,24 @@ static void input_field(char *out, size_t cap, const char *label,
     snprintf(out, cap, "%s[%s%*s]", label, shown, pad, "");
 }
 
+/* "label：[value   ]" -> "label\x01value" (trim padding + brackets) */
+static void field_card_text(char *out, size_t cap, const char *src) {
+    if (!src) { out[0] = 0; return; }
+    const char *lb = strchr(src, '[');
+    if (!lb) { str_copy(out, cap, src); return; }
+    size_t lablen = (size_t)(lb - src);
+    if (lablen > cap - 4) lablen = cap - 4;
+    memcpy(out, src, lablen);
+    size_t w = lablen;
+    out[w++] = '\x01';
+    const char *rb = strrchr(lb + 1, ']');
+    size_t vlen = rb ? (size_t)(rb - (lb + 1)) : strlen(lb + 1);
+    while (vlen > 0 && (lb[1 + vlen - 1] == ' ')) vlen--;
+    if (w + vlen >= cap) vlen = cap - w - 1;
+    memcpy(out + w, lb + 1, vlen);
+    out[w + vlen] = 0;
+}
+
 static void build_input_book(App *a, const char *title, const char *field0,
                              const char *field1, int editing,
                              const char *btn_label) {
@@ -1169,12 +1187,20 @@ static void build_input_book(App *a, const char *title, const char *field0,
     int roomy = a->geo.rows >= 20;
 
     book_add_line(&a->book, L_BLANK, "", 0, 0, 1);
+    /* Convert "label：[value   ]" from input_field() into "label\x01value" for
+     * the L_FIELD painter (SVG 1:1 field cards). */
     char l0[HIPDA_NAME_LEN], l1[HIPDA_NAME_LEN];
-    snprintf(l0, sizeof(l0), "%s%s", field0, editing == 0 ? "" : "");
-    snprintf(l1, sizeof(l1), "%s%s", field1, editing == 1 ? "" : "");
-    book_wrap_text(&a->book, &a->geo, editing == 0 ? L_ITEM : L_META, l0, 0, 1, 1);
+    field_card_text(l0, sizeof(l0), field0);
+    field_card_text(l1, sizeof(l1), field1);
+    /* item_id 101/102 marks the focused (being-edited) field */
+    book_add_line(&a->book, L_FIELD, l0, 0,
+                  editing == 0 ? 101 : 1, 1);
     book_add_line(&a->book, L_BLANK, "", 0, 0, 1);
-    book_wrap_text(&a->book, &a->geo, editing == 1 ? L_ITEM : L_META, l1, 0, 2, 1);
+    if (a->input_mode == 3)                 /* search: second line is a hint */
+        book_wrap_text(&a->book, &a->geo, L_NOTE, l1, 0, 0, 1);
+    else
+        book_add_line(&a->book, L_FIELD, l1, 0,
+                      editing == 1 ? 102 : 2, 1);
     /* the login button sits directly under the two fields; Enter ([回车] on
      * the control row) does the same thing */
     book_add_line(&a->book, L_BLANK, "", 0, 0, 1);

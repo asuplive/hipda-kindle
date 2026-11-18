@@ -26,7 +26,8 @@ typedef enum {
     L_CARD_T,      /* card top row: bold title + right chevron, item_id=id */
     L_CARD_B,      /* card bottom row: small gray subtitle (pairs with T) */
     L_NUM,         /* numbered item row: "NN" + title + chevron (menu/settings) */
-    L_POSTHEAD     /* post floor header: gray text with a thick left bar */
+    L_POSTHEAD,    /* post floor header: gray text with a thick left bar */
+    L_FIELD        /* login/search input: "label|value", boxed field card */
 } LineKind;
 
 /* Keyboard geometry contract shared by painter and hit-test:

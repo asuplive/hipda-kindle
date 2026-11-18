@@ -37,48 +37,20 @@ static void clip_cells(char *dst, size_t cap, const char *src, int max_cells) {
     if (o == 0) dst[0] = 0;
 }
 
-/* Round "refresh" affordance. `phase` rotates a gap around the ring so the
- * icon visibly moves while a page is being reloaded. */
-static void draw_ring(Canvas *c, int cx, int cy, int r, int thick,
-                      uint8_t v, int phase) {
-    double gap_start = (double)((phase & 3) * 90) * 3.14159265 / 180.0;
-    int outer = r * r;
-    int inner = (r - thick) * (r - thick);
-    for (int y = cy - r; y <= cy + r; y++) {
-        for (int x = cx - r; x <= cx + r; x++) {
-            int dx = x - cx, dy = y - cy;
-            int d2 = dx * dx + dy * dy;
-            if (d2 > outer || d2 < inner) continue;
-            double ang = atan2((double)dy, (double)dx);
-            if (ang < 0) ang += 6.2831853;
-            double rel = ang - gap_start;
-            while (rel < 0) rel += 6.2831853;
-            if (rel < 1.25) continue;            /* the gap */
-            canvas_pixel(c, x, y, v);
-        }
-    }
-    double a2 = gap_start + 1.25;
-    int ax = cx + (int)((r - thick) * cos(a2));
-    int ay = cy + (int)((r - thick) * sin(a2));
-    canvas_rect(c, ax - thick, ay - thick, thick * 2 + 1, thick * 2 + 1, v);
-}
-
 /* Toolbar hit test — must match exactly what render_page draws.
  * Returns 1 for the "Hi" menu button, 2 for the refresh ring, 0 elsewhere. */
 int render_toolbar_hit(const Geometry *g, int x, int y) {
-    int scale = g->scale;
     int mx = g->margin_x, my = g->margin_y;
-    int top = my - 3 * scale;
-    int bottom = my + g->cell_h + 3 * scale;
-    if (y < top || y > bottom) return 0;
-
-    int hi_x = mx - 2 * scale;
-    int hi_w = 2 * g->cell_w + 7 * scale;
-    if (x >= hi_x && x <= hi_x + hi_w) return 1;
-
-    int r = g->cell_h / 2 + 2 * scale;
-    int cx = g->w - mx - r - 2 * scale;
-    if (x >= cx - r - 3 * scale && x <= cx + r + 3 * scale) return 2;
+    int hi_w = 3 * g->cell_w;
+    int hi_x = mx - g->cell_w / 2;
+    int hi_y = my - g->cell_w / 2;
+    /* Hi square */
+    if (x >= hi_x && x <= hi_x + hi_w && y >= hi_y && y <= hi_y + hi_w)
+        return 1;
+    /* page counter doubles as the refresh target (SVG shows text only) */
+    int bottom = my + hi_w + g->cell_w;
+    if (y >= hi_y && y <= bottom && x >= g->w - mx - 10 * g->cell_w)
+        return 2;
     return 0;
 }
 
@@ -89,14 +61,14 @@ static void footer_btn_rect(const Geometry *g, int which,
     int scale = g->scale;
     int right = g->w - g->margin_x;
     int fy = g->h - g->margin_y - g->line_h;
-    int gap = 4 * scale;
-    int wpage = 8 * g->cell_w;
-    int wback = 5 * g->cell_w;
-    if (which == 0)      *bx = g->margin_x - 2 * scale;
-    else if (which == 1) *bx = right - wback - gap - wpage;
+    int span = right - g->margin_x;
+    int wback = 5 * g->cell_w;                 /* SVG 98px @600 */
+    int wlabel = span * 120 / 536;             /* text hit strip */
+    if (which == 0)      *bx = g->margin_x;
+    else if (which == 1) *bx = g->margin_x + span * 118 / 536;
     else                 *bx = right - wback;
     *by = fy - 2 * scale;
-    *bw = (which == 2) ? wback : wpage;
+    *bw = (which == 2) ? wback : wlabel;
     *bh = g->cell_h + 4 * scale;
 }
 
@@ -112,6 +84,7 @@ int render_footer_btn_hit(const Geometry *g, int x, int y) {
 void render_page(Canvas *c, Font *font, const Geometry *g, const Book *b,
                  int page_index, int sel_line, int press_line,
                  const char *flash_msg, int theme, int refresh_phase) {
+    (void)refresh_phase;
     canvas_fill(c, ink(theme, INK_WHITE));
     const int scale = g->scale;
     const int lh = g->line_h;
@@ -119,40 +92,38 @@ void render_page(Canvas *c, Font *font, const Geometry *g, const Book *b,
     const int my = g->margin_y;
     const int right = g->w - mx;
 
-    /* ---- toolbar: [Hi] title .... page (o) ---- */
-    int hi_x = mx - 2 * scale;
-    int hi_w = 2 * g->cell_w + 7 * scale;
-    int hi_h = g->cell_h + 5 * scale;
-    int hi_y = my - 2 * scale;
-    canvas_frame(c, hi_x, hi_y, hi_w, hi_h, ink(theme, INK_BLACK),
-                 scale > 1 ? 2 : 1);
-    font_draw_text(font, c, hi_x + 3 * scale, my, "Hi", scale,
-                   ink(theme, INK_BLACK), 1);
+    /* ---- toolbar (SVG 1:1): solid black [Hi] square, bold title, right-
+     * aligned "page / total" text, then a rule. No refresh ring in the mockup;
+     * tapping the page counter still refreshes (hit test keeps that region). */
+    int hi_w = 3 * g->cell_w;                 /* SVG 36px @600 -> ~3 cells */
+    int hi_h = 3 * g->cell_w;
+    int hi_x = mx - g->cell_w / 2;
+    int hi_y = my - g->cell_w / 2;
+    canvas_rect(c, hi_x, hi_y, hi_w, hi_h, ink(theme, INK_BLACK));
+    int hi_scale = scale > 2 ? scale - 1 : scale;
+    int hi_tw = font_text_width(font, "Hi", hi_scale);
+    font_draw_text(font, c, hi_x + (hi_w - hi_tw) / 2,
+                   hi_y + (hi_h - 16 * hi_scale) / 2, "Hi", hi_scale,
+                   ink(theme, INK_WHITE), 1);
 
-    int r = g->cell_h / 2 + 2 * scale;
-    int ring_cx = right - r - 2 * scale;
-    int ring_cy = my + g->cell_h / 2;
-    draw_ring(c, ring_cx, ring_cy, r, scale > 1 ? 3 : 2,
-              ink(theme, INK_BLACK), refresh_phase);
-
-    /* page counter just left of the ring */
     char counter[64];
-    snprintf(counter, sizeof(counter), "%d/%d", page_index + 1, b->np);
-    int cw = font_text_width(font, counter, scale);
-    font_draw_text(font, c, ring_cx - r - 5 * scale - cw, my, counter, scale,
+    snprintf(counter, sizeof(counter), "%d / %d", page_index + 1, b->np);
+    int cw = font_text_width(font, counter, hi_scale);
+    int counter_x = right - cw;
+    font_draw_text(font, c, counter_x, my, counter, hi_scale,
                    ink(theme, INK_GRAY), 0);
 
-    /* title fills what is left between the button and the counter */
-    int title_cells = (ring_cx - r - 8 * scale - cw - (hi_x + hi_w + 4 * scale))
-                      / g->cell_w;
+    /* title fills the space between the Hi square and the page counter */
+    int title_x = hi_x + hi_w + g->cell_w;
+    int title_cells = (counter_x - g->cell_w - title_x) / g->cell_w;
     if (title_cells < 4) title_cells = 4;
     char head[HIPDA_NAME_LEN];
     clip_cells(head, sizeof(head), b->title, title_cells);
-    font_draw_text(font, c, hi_x + hi_w + 4 * scale, my, head, scale,
+    font_draw_text(font, c, title_x, my, head, scale,
                    ink(theme, INK_BLACK), 1);
 
-    canvas_hline(c, mx, my + g->cell_h + 4 * scale, right - mx,
-                 ink(theme, INK_FAINT), scale > 1 ? 2 : 1);
+    canvas_hline(c, mx, my + hi_h - g->cell_w / 2, right - mx,
+                 ink(theme, INK_BLACK), scale > 1 ? 2 : 1);
 
     /* ---- content ---- */
     int y = my + lh;
@@ -245,6 +216,41 @@ void render_page(Canvas *c, Font *font, const Geometry *g, const Book *b,
                 font_draw_text(font, c, bx + 5 * scale, y, l->text, scale,
                                ink(theme, INK_BLACK), 1);
             }
+        } else if (l->kind == L_FIELD) {
+            /* SVG 06-login field card: framed row, thick left bar, label on
+             * the left, a bordered input box on the right. text = "label\x01value". */
+            const char *t = l->text ? l->text : "";
+            const char *bar = strchr(t, '\x01');
+            char label[HIPDA_NAME_LEN], value[HIPDA_NAME_LEN];
+            size_t ln = bar ? (size_t)(bar - t) : strlen(t);
+            if (ln >= sizeof(label)) ln = sizeof(label) - 1;
+            memcpy(label, t, ln); label[ln] = 0;
+            str_copy(value, sizeof(value), bar ? bar + 1 : "");
+            int hh = g->cell_h + 3 * scale;
+            int top = y - scale;
+            canvas_frame(c, mx, top, right - mx, hh, ink(theme, INK_BLACK),
+                         scale > 1 ? 2 : 1);
+            canvas_rect(c, mx, top, 3 * scale, hh, ink(theme, INK_BLACK));
+            int ls = scale > 2 ? scale - 1 : scale;
+            font_draw_text(font, c, mx + g->cell_w / 2,
+                           y + (g->cell_h - 16 * ls) / 2, label, ls,
+                           ink(theme, INK_BLACK), 1);
+            /* input box: SVG x=150/600 -> 28% of content width */
+            int ix = mx + (right - mx) * 118 / 536;
+            int iw = right - ix - scale;
+            int iy = top + scale;
+            int ih = hh - 2 * scale;
+            int focused = (l->item_id >= 101) || (i == press_line);
+            if (focused) {
+                canvas_rect(c, ix, iy, iw, ih, ink(theme, INK_BLACK));
+                font_draw_text(font, c, ix + scale, y + (g->cell_h - 16 * ls) / 2,
+                               value, ls, ink(theme, INK_WHITE), 0);
+            } else {
+                canvas_frame(c, ix, iy, iw, ih, ink(theme, INK_BLACK),
+                             scale > 1 ? 2 : 1);
+                font_draw_text(font, c, ix + scale, y + (g->cell_h - 16 * ls) / 2,
+                               value, ls, ink(theme, INK_BLACK), 0);
+            }
         } else if (l->kind == L_POSTHEAD) {
             /* floor header: a thick left bar + small gray "N 楼 author time" */
             canvas_rect(c, mx, y, 3 * scale, g->cell_h, ink(theme, INK_BLACK));
@@ -252,10 +258,10 @@ void render_page(Canvas *c, Font *font, const Geometry *g, const Book *b,
                            scale > 1 ? scale - 1 : scale,
                            ink(theme, INK_GRAY), 0);
         } else if (l->kind == L_GROUP) {
-            /* section caption: small solid square + bold label */
-            canvas_rect(c, x, y + scale, 3 * scale, 3 * scale,
+            /* section caption: solid square + bold label (SVG 9px @600) */
+            canvas_rect(c, x, y + scale, g->cell_w, g->cell_w,
                         ink(theme, INK_BLACK));
-            font_draw_text(font, c, x + 5 * g->cell_w / 2, y, l->text ? l->text : "",
+            font_draw_text(font, c, x + 2 * g->cell_w, y, l->text ? l->text : "",
                            scale, ink(theme, INK_BLACK), 1);
         } else if (l->kind == L_CARD_T || l->kind == L_CARD_B) {
             /* Framed card over two rows: thin outline, thick left bar,
@@ -371,31 +377,31 @@ void render_page(Canvas *c, Font *font, const Geometry *g, const Book *b,
         y += lh;
     }
 
-    /* ---- footer: [‹ 上一页] .. page .. [下一页 ›] [返回] ---- */
+    /* ---- footer (SVG 1:1): "‹ 上一页" and "下一页 ›" as plain text,
+     * a grey page counter in the middle, and a boxed "返回" at right. ---- */
     int fy = g->h - my - lh;
-    canvas_hline(c, mx, fy - 3 * scale, right - mx, ink(theme, INK_FAINT),
+    canvas_hline(c, mx, fy - 3 * scale, right - mx, ink(theme, INK_BLACK),
                  scale > 1 ? 2 : 1);
-
-    static const char *const btn_text[3] = { "‹ 上一页", "下一页 ›", "返回" };
-    for (int i = 0; i < 3; i++) {
-        int bx, by, bw, bh;
-        footer_btn_rect(g, i, &bx, &by, &bw, &bh);
-        canvas_frame(c, bx, by, bw, bh, ink(theme, INK_GRAY), scale > 1 ? 2 : 1);
-        int tw = font_text_width(font, btn_text[i], scale);
-        font_draw_text(font, c, bx + (bw - tw) / 2, fy, btn_text[i], scale,
-                       ink(theme, INK_GRAY), 0);
-    }
-
-    /* page counter centred between the prev and next buttons */
+    int fs = scale > 2 ? scale - 1 : scale;    /* SVG fs15 -> smaller */
+    font_draw_text(font, c, mx, fy, "‹ 上一页", fs,
+                   ink(theme, INK_BLACK), 0);
+    int nx = mx + (right - mx) * 118 / 600;    /* SVG x=150 -> (150-32)/536 */
+    font_draw_text(font, c, nx, fy, "下一页 ›", fs,
+                   ink(theme, INK_BLACK), 0);
+    /* page counter centred between the two page-turn labels */
     char mid[64];
     snprintf(mid, sizeof(mid), "%d / %d", page_index + 1, b->np);
-    int p0x, p0y, p0w, p0h, p1x, p1y, p1w, p1h;
-    footer_btn_rect(g, 0, &p0x, &p0y, &p0w, &p0h);
-    footer_btn_rect(g, 1, &p1x, &p1y, &p1w, &p1h);
-    int mw = font_text_width(font, mid, scale);
-    int mcenter = (p0x + p0w + p1x) / 2;
-    font_draw_text(font, c, mcenter - mw / 2, fy, mid, scale,
+    int mw = font_text_width(font, mid, fs);
+    int mcenter = mx + (right - mx) * 298 / 536;  /* SVG x=330 */
+    font_draw_text(font, c, mcenter - mw / 2, fy, mid, fs,
                    ink(theme, INK_GRAY), 0);
+    /* boxed back button at the right */
+    int bx, by, bw, bh;
+    footer_btn_rect(g, 2, &bx, &by, &bw, &bh);
+    canvas_frame(c, bx, by, bw, bh, ink(theme, INK_BLACK), scale > 1 ? 2 : 1);
+    int tw = font_text_width(font, "返回", fs);
+    font_draw_text(font, c, bx + (bw - tw) / 2, fy, "返回", fs,
+                   ink(theme, INK_BLACK), 0);
 
     if (flash_msg && flash_msg[0]) {
         int fw = font_text_width(font, flash_msg, scale);
@@ -413,17 +419,90 @@ void render_page(Canvas *c, Font *font, const Geometry *g, const Book *b,
     canvas_hline(c, mx, py, (right - mx) * pct / 100, ink(theme, INK_BLACK), scale);
 }
 
+static void render_toolbar_static(Canvas *c, Font *font, const Geometry *g,
+                                  const char *title, const char *counter,
+                                  int theme) {
+    int scale = g->scale;
+    int mx = g->margin_x, my = g->margin_y, right = g->w - mx;
+    int hi_w = 3 * g->cell_w;
+    int hi_x = mx - g->cell_w / 2, hi_y = my - g->cell_w / 2;
+    canvas_rect(c, hi_x, hi_y, hi_w, hi_w, ink(theme, INK_BLACK));
+    int hs = scale > 2 ? scale - 1 : scale;
+    int tw = font_text_width(font, "Hi", hs);
+    font_draw_text(font, c, hi_x + (hi_w - tw) / 2,
+                   hi_y + (hi_w - 16 * hs) / 2, "Hi", hs,
+                   ink(theme, INK_WHITE), 1);
+    if (counter && *counter) {
+        int cw = font_text_width(font, counter, hs);
+        font_draw_text(font, c, right - cw, my, counter, hs,
+                       ink(theme, INK_GRAY), 0);
+    }
+    int title_x = hi_x + hi_w + g->cell_w;
+    int maxcells = (right - 10 * g->cell_w - title_x) / g->cell_w;
+    if (maxcells < 4) maxcells = 4;
+    char head[HIPDA_NAME_LEN];
+    clip_cells(head, sizeof(head), title ? title : "", maxcells);
+    font_draw_text(font, c, title_x, my, head, scale,
+                   ink(theme, INK_BLACK), 1);
+    canvas_hline(c, mx, my + hi_w - g->cell_w / 2, right - mx,
+                 ink(theme, INK_BLACK), scale > 1 ? 2 : 1);
+}
+
 void render_message(Canvas *c, Font *font, const Geometry *g,
                     const char *title, const char *body, int theme) {
     canvas_fill(c, ink(theme, INK_WHITE));
     int scale = g->scale;
-    int x = g->margin_x;
+    int mx = g->margin_x, right = g->w - mx;
+    int loading = title && (strstr(title, "正在加载") || strstr(title, "正在读取"));
+    if (loading) {
+        /* SVG 02-loading 1:1: toolbar, big framed panel, thick left bar,
+         * 6 progress squares, centred title + explanation + cancel hint. */
+        render_toolbar_static(c, font, g, title, "···", theme);
+        int cy = g->h * 25 / 100;             /* SVG y=200/800 */
+        int ch = g->h * 375 / 1000;           /* SVG h=300/800 */
+        canvas_frame(c, mx, cy, right - mx, ch, ink(theme, INK_BLACK),
+                     scale > 1 ? 2 : 1);
+        canvas_rect(c, mx, cy, 3 * scale, ch, ink(theme, INK_BLACK));
+        /* progress squares: SVG x=220..404 step 32, y=248 */
+        int bs = 24 * g->w / 600;
+        int step = 32 * g->w / 600;
+        int sy = cy + 48 * g->w / 600;
+        int sx = g->w / 2 - step * 3 + (step - bs) / 2;
+        for (int k = 0; k < 6; k++) {
+            int px = sx + k * step;
+            if (k < 3) canvas_rect(c, px, sy, bs, bs, ink(theme, INK_BLACK));
+            else canvas_frame(c, px, sy, bs, bs, ink(theme, INK_BLACK),
+                              scale > 1 ? 2 : 1);
+        }
+        int hs = scale > 2 ? scale - 1 : scale;
+        font_draw_text(font, c, g->w / 2 - font_text_width(font, "正在读取论坛数据", scale) / 2,
+                       cy + 120 * g->w / 600, "正在读取论坛数据", scale,
+                       ink(theme, INK_BLACK), 1);
+        font_draw_text(font, c, g->w / 2 - font_text_width(font, "正在从论坛读取主题列表。", hs) / 2,
+                       cy + 160 * g->w / 600, "正在从论坛读取主题列表。", hs,
+                       ink(theme, INK_GRAY), 0);
+        canvas_hline(c, g->w * 12 / 100, cy + 192 * g->w / 600,
+                     g->w * 76 / 100, ink(theme, 0xCC), scale > 1 ? 2 : 1);
+        font_draw_text(font, c, g->w / 2 - font_text_width(font, "点任意位置可取消", hs) / 2,
+                       cy + 232 * g->w / 600, "点任意位置可取消", hs,
+                       ink(theme, INK_BLACK), 0);
+        font_draw_text(font, c, g->w / 2 - font_text_width(font, "加载完成后自动进入板块列表", hs) / 2,
+                       cy + 266 * g->w / 600, "加载完成后自动进入板块列表", hs,
+                       ink(theme, INK_GRAY), 0);
+        font_draw_text(font, c, g->w / 2 - font_text_width(font, "点任意位置返回", hs) / 2,
+                       g->h - g->margin_y - g->line_h, "点任意位置返回", hs,
+                       ink(theme, INK_GRAY), 0);
+        return;
+    }
+    /* ordinary message: toolbar + plain wrapped text */
+    render_toolbar_static(c, font, g, title, NULL, theme);
+    int x = mx;
     int y = g->margin_y + 2 * g->line_h;
     font_draw_text(font, c, x, y, title ? title : "", scale,
                    ink(theme, INK_BLACK), 1);
     y += 2 * g->line_h;
-    canvas_hline(c, x, y - 3 * scale, g->w - 2 * g->margin_x,
-                 ink(theme, INK_FAINT), scale > 1 ? 2 : 1);
+    canvas_hline(c, x, y - 3 * scale, right - mx,
+                 ink(theme, INK_BLACK), scale > 1 ? 2 : 1);
     char line[HIPDA_NAME_LEN];
     const char *p = body ? body : "";
     while (*p) {
@@ -439,7 +518,6 @@ void render_message(Canvas *c, Font *font, const Geometry *g,
         if (!nl) break;
         p = nl + 1;
     }
-    const char *hint = "点任意位置返回";
     font_draw_text(font, c, x, g->h - g->margin_y - g->line_h,
-                   hint, scale, ink(theme, INK_GRAY), 0);
+                   "点任意位置返回", scale, ink(theme, INK_GRAY), 0);
 }
