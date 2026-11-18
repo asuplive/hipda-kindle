@@ -1196,11 +1196,14 @@ static void build_input_book(App *a, const char *title, const char *field0,
     book_add_line(&a->book, L_FIELD, l0, 0,
                   editing == 0 ? 101 : 1, 1);
     book_add_line(&a->book, L_BLANK, "", 0, 0, 1);
+    book_add_line(&a->book, L_BLANK, "", 0, 0, 1);
     if (a->input_mode == 3)                 /* search: second line is a hint */
         book_wrap_text(&a->book, &a->geo, L_NOTE, l1, 0, 0, 1);
-    else
+    else {
         book_add_line(&a->book, L_FIELD, l1, 0,
                       editing == 1 ? 102 : 2, 1);
+        book_add_line(&a->book, L_BLANK, "", 0, 0, 1);
+    }
     /* the login button sits directly under the two fields; Enter ([回车] on
      * the control row) does the same thing */
     book_add_line(&a->book, L_BLANK, "", 0, 0, 1);
@@ -1479,7 +1482,9 @@ static void input_view_action(App *a, Action act, int line_index, int tap_x) {
 
     /* ---- control row: Sh / Pg / 空格 / 退格 / 回车 / 取消 ---- */
     if (id == KEY_CTRL_ID) {
-        int step = a->geo.cell_w * KEY_CTRL_STRIDE;
+        /* SVG layout: 6 buttons, stride 90/536 of the content width */
+        int span = a->geo.w - 2 * a->geo.margin_x;
+        int step = span * 90 / 536;
         if (step < 1) step = 1;
         int col = (tap_x - a->geo.margin_x) / step;
         if (col < 0 || col > 5) return;
@@ -1529,11 +1534,12 @@ static void input_view_action(App *a, Action act, int line_index, int tap_x) {
         }
     }
 
-    /* ---- pinyin candidate row: 8 slots, 5 cells apart ---- */
+    /* ---- pinyin candidate row: 8 equal slots across the content width ---- */
     if (id == KEY_CAND_ID) {
         const char *cs = l->text ? l->text : "";
         int n = (int)strlen(cs) / 3;
-        int step = a->geo.cell_w * KEY_CAND_STRIDE;
+        int span = a->geo.w - 2 * a->geo.margin_x;
+        int step = span / KEY_CAND_SLOTS;
         if (step < 1) step = 1;
         int col = (tap_x - a->geo.margin_x) / step;
         if (col < 0 || col > 7) return;
@@ -1559,7 +1565,9 @@ static void input_view_action(App *a, Action act, int line_index, int tap_x) {
     for (int r = 0; r < KEY_PAGES * KEY_ROWS_PER_PAGE; r++)
         if (l->text && !strcmp(l->text, kKeyRows[r])) { row = r; break; }
     if (row < 0) return;
-    int step = a->geo.cell_w * KEY_CHARS;
+    /* SVG key grid: stride 54/536 of the content width, 10 keys */
+    int span = a->geo.w - 2 * a->geo.margin_x;
+    int step = span * 54 / 536;
     if (step < 1) step = 1;
     int col = (tap_x - a->geo.margin_x) / step;
     if (col < 0 || col >= KEY_COLS) return;

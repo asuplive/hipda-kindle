@@ -89,18 +89,27 @@ typedef struct {
     int  img_mode;           /* 0 = hide images, 1 = tap-to-view       */
 } Config;
 
-/* Screen geometry, filled by the active UI backend. */
+/* Screen geometry, filled by the active UI backend. All type sizes follow
+ * the SVG mockups (600x800 reference) scaled to the real screen: the body
+ * text height is 16 * w/600, and every other size is its SVG ratio of that. */
 typedef struct {
     int w, h;
     int dpi;
-    int scale;       /* glyph magnification */
-    int cell_w;      /* 8 * scale */
-    int cell_h;      /* 16 * scale */
-    int line_h;      /* cell_h + leading */
+    int scale;       /* line-stroke unit: ~w/400, kept for rules/borders */
+    int cell_w;      /* half-width of one body character = body_h / 2   */
+    int cell_h;      /* body text height                                */
+    int line_h;      /* cell_h + leading (SVG 25/16 ratio)              */
     int margin_x;
     int margin_y;
     int cols;        /* printable cells per line */
     int rows;        /* printable lines per page (footer reserved) */
+    int top_h;       /* toolbar rule y  = 82 * h/800  */
+    int foot_y;      /* footer rule y   = 722 * h/800 */
+    int head_h;      /* toolbar title height (SVG fs21) */
+    int title_h;     /* card/list title height (SVG fs18) */
+    int sub_h;       /* subtitle / meta height (SVG fs13) */
+    int small_h;     /* hints (SVG fs12)                */
+    int foot_h;      /* footer text height (SVG fs15)   */
 } Geometry;
 
 #endif /* HIPDA_H */

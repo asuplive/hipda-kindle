@@ -206,15 +206,23 @@ static void test_discuz(void) {
 
 static void test_layout(void) {
     printf("[pagination / layout]\n");
+    /* New SVG-proportional geometry: scale is a stroke unit (~w/600),
+     * body text = 16 * w/600, cols = content width / (body/2). */
     Geometry g;
     geometry_compute(&g, 600, 800, 167, 0);
-    CHECK(g.scale == 2, "600x800@167 -> scale 2");
-    CHECK(g.cols >= 20 && g.cols <= 60, "sane line width");
+    CHECK(g.scale == 1, "600x800 -> stroke unit 1");
+    CHECK(g.cell_h == 16, "600x800 -> body 16px (SVG fs16)");
+    CHECK(g.cols >= 40 && g.cols <= 90, "sane line width");
     CHECK(g.rows >= 8, "sane page height");
     Geometry hd;
     geometry_compute(&hd, 1072, 1448, 300, 0);
-    CHECK(hd.scale >= 3, "300dpi -> scale >= 3");
+    CHECK(hd.scale >= 2, "1072px -> stroke unit >= 2");
+    CHECK(hd.cell_h > g.cell_h, "larger screen -> bigger body text");
     CHECK(hd.cols > g.cols, "larger screen -> more cells per line");
+    Geometry o3;
+    geometry_compute(&o3, 1264, 1680, 300, 0);
+    CHECK(o3.cell_h == 33 || o3.cell_h == 34, "Oasis3 body ~= SVG fs16 * 2.1");
+    CHECK(o3.top_h == 172 && o3.foot_y == 1516, "Oasis3 toolbar/footer rules");
 
     ThreadPage thread;
     memset(&thread, 0, sizeof(thread));
@@ -316,7 +324,7 @@ static void test_font_raster(void) {
         CHECK(font_glyph(&f, 0x4E2D) != NULL, "CJK glyph present");
         Canvas c;
         CHECK(canvas_init(&c, 320, 240) == 0, "canvas init");
-        font_draw_text(&f, &c, 8, 8, "HiPDA 中文", 2, 0, 1);
+        font_draw_text(&f, &c, 8, 8, "HiPDA 中文", 16, 0, 1);
         int dark = 0;
         for (size_t i = 0; i < (size_t)c.w * c.h; i++) if (c.px[i] < 100) dark++;
         CHECK(dark > 200, "glyphs actually painted pixels");

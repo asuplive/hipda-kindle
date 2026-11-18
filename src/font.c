@@ -6,6 +6,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* HUF fonts: glyph_h is 16 (legacy unifont.bin) or 32 (hi-res reading.bin).
+ * Glyphs are drawn at ANY target pixel height via nearest-neighbour mapping,
+ * so every UI element can match the SVG mockup type scale exactly. */
+
 int font_load(Font *f, const char *path) {
     memset(f, 0, sizeof(*f));
     Str raw; str_init(&raw);
@@ -22,9 +26,16 @@ int font_load(Font *f, const char *path) {
     f->size = raw.len;
     f->records = f->blob + 16;
     raw.data = NULL; raw.len = raw.cap = 0;
-    if (f->rec_size != 36 || f->glyph_h != 16 || f->row_bytes != 2 ||
-        f->count == 0 || 16 + (size_t)f->count * f->rec_size > f->size) {
-        log_msg("font: inconsistent HUF1 header in %s", path);
+    int glyph_bytes = f->glyph_h * f->row_bytes;
+    uint32_t want_rec = (uint32_t)glyph_bytes + 4;
+    int ok = (f->glyph_h == 16 || f->glyph_h == 32) &&
+             f->row_bytes == f->glyph_h / 8 &&
+             f->rec_size == want_rec &&
+             f->count > 0 &&
+             16 + (size_t)f->count * f->rec_size <= f->size;
+    if (!ok) {
+        log_msg("font: inconsistent HUF1 header in %s (h=%d rb=%d rs=%d)",
+                path, f->glyph_h, f->row_bytes, f->rec_size);
         font_free(f);
         return -1;
     }
@@ -42,7 +53,8 @@ int font_load(Font *f, const char *path) {
     }
     f->last_cp = 0xFFFFFFFFu;
     f->last_glyph = NULL;
-    log_msg("font: %s -> %u glyphs, %zu bytes", path, f->count, f->size);
+    log_msg("font: %s -> %u glyphs, %dpx, %zu bytes",
+            path, f->count, f->glyph_h, f->size);
     return 0;
 }
 void font_free(Font *f) { free(f->blob); memset(f, 0, sizeof(*f)); }
@@ -65,72 +77,79 @@ const uint8_t *font_glyph(Font *f, uint32_t cp) {
     return found;
 }
 
+/* Draw one glyph scaled to target height `th`.
+ * Source: glyph_h rows, row_bytes*8 columns. A cell is half the source
+ * width for ASCII (cells=1) and the full width for CJK (cells=2); the
+ * target advance is th/2 per cell, preserving the 1:2 width ratio. */
 static void draw_glyph(Font *f, Canvas *c, int x, int y, uint32_t cp,
-                       int cells, int scale, uint8_t ink) {
+                       int cells, int th, uint8_t ink) {
     const uint8_t *bmp = font_glyph(f, cp);
     if (!bmp) bmp = font_glyph(f, '?');
+    int H = f->glyph_h ? f->glyph_h : 16;
+    int W = (f->row_bytes ? f->row_bytes : 2) * 8;
+    int gw = th / 2 * cells;                 /* target glyph width */
+    if (gw < 1) gw = 1;
     if (!bmp) {
-        canvas_frame(c, x + scale, y + scale, cells * 8 * scale - 2 * scale,
-                     16 * scale - 2 * scale, ink, scale);
+        canvas_frame(c, x, y, gw, th, ink, 1);
         return;
     }
-    int maxcol = cells * 8;
-    if (maxcol > 16) maxcol = 16;
-    /* Render source pixel rows into the canvas. Coordinates are inside the
-     * canvas (the layout guarantees it), so we write directly instead of
-     * paying for canvas_rect's per-call clipping. Consecutive set bits on a
-     * row are merged into one memset — a glyph is mostly horizontal runs. */
-    for (int row = 0; row < 16; row++) {
-        uint16_t bits = (uint16_t)((bmp[row * 2] << 8) | bmp[row * 2 + 1]);
+    int srcw = W / 2 * cells;                /* source columns in use */
+    if (srcw > W) srcw = W;
+    for (int row = 0; row < th; row++) {
+        int srow = row * H / th;
+        const uint8_t *rp = bmp + (size_t)srow * f->row_bytes;
+        uint32_t bits = 0;
+        for (int b = 0; b < f->row_bytes; b++)
+            bits = (bits << 8) | rp[b];
+        bits <<= (32 - W);       /* MSB-align: bit31 = leftmost source col */
         if (!bits) continue;
-        int yy = y + row * scale;
+        int yy = y + row;
         if (yy < 0 || yy >= c->h) continue;
-        if (scale == 1) {
-            uint8_t *dst = c->px + (size_t)yy * c->w;
-            for (int col = 0; col < maxcol; col++)
-                if (bits & (uint16_t)(0x8000u >> col) &&
-                    x + col >= 0 && x + col < c->w)
-                    dst[x + col] = ink;
-        } else {
-            int col = 0;
-            while (col < maxcol) {
-                if (!(bits & (uint16_t)(0x8000u >> col))) { col++; continue; }
-                int start = col;
-                while (col < maxcol && (bits & (uint16_t)(0x8000u >> col))) col++;
-                /* run [start, col) -> one horizontal block, scale rows tall */
-                int bx = x + start * scale;
-                int bw = (col - start) * scale;
-                if (bx < 0) { bw += bx; bx = 0; }
-                if (bx + bw > c->w) bw = c->w - bx;
-                if (bw > 0) {
-                    int y1 = yy + scale;
-                    if (y1 > c->h) y1 = c->h;
-                    for (int ry = yy; ry < y1; ry++)
-                        memset(c->px + (size_t)ry * c->w + bx, ink, (size_t)bw);
-                }
+        int col = 0;
+        while (col < gw) {
+            int sc = col * srcw / gw;
+            if (!(bits & (0x80000000u >> sc))) { col++; continue; }
+            int start = col;
+            while (col < gw) {
+                sc = col * srcw / gw;
+                if (!(bits & (0x80000000u >> sc))) break;
+                col++;
+            }
+            /* horizontal run [start, col) at one source row */
+            int bx = x + start, bw = col - start;
+            if (bx < 0) { bw += bx; bx = 0; }
+            if (bx + bw > c->w) bw = c->w - bx;
+            if (bw > 0) {
+                int y1 = yy + 1;
+                if (y1 > c->h) y1 = c->h;
+                memset(c->px + (size_t)yy * c->w + bx, ink, (size_t)bw);
+                (void)y1;
             }
         }
     }
 }
 
+/* Draw one UTF-8 string at target height th. Returns x after the last glyph. */
 int font_draw_text(Font *f, Canvas *c, int x, int y, const char *s,
-                   int scale, uint8_t ink, int bold) {
-    if (!s || scale < 1) return x;
+                   int th, uint8_t ink, int bold) {
+    if (!s || th < 4) return x;
     const char *p = s, *end = s + strlen(s);
     int px = x;
+    int bold_off = th / 24 > 0 ? th / 24 : 1;
     while (p < end) {
         uint32_t cp = utf8_next(&p, end);
         int cells = utf8_cells(cp);
         if (cells <= 0) continue;
-        if (cp == ' ') { px += cells * 8 * scale; continue; }
-        draw_glyph(f, c, px, y, cp, cells, scale, ink);
-        if (bold && scale > 1) draw_glyph(f, c, px + 1, y, cp, cells, scale, ink);
-        px += cells * 8 * scale;
+        if (cp == ' ') { px += cells * th / 2; continue; }
+        draw_glyph(f, c, px, y, cp, cells, th, ink);
+        if (bold) draw_glyph(f, c, px + bold_off, y, cp, cells, th, ink);
+        px += cells * th / 2;
     }
     return px;
 }
 
-int font_text_width(Font *f, const char *s, int scale) {
+int font_text_width(Font *f, const char *s, int th) {
     (void)f;
-    return utf8_str_cells(s) * 8 * scale;
+    if (!s || th < 4) return 0;
+    return utf8_str_cells(s) * th / 2;
 }

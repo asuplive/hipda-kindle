@@ -6,22 +6,40 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Type sizes follow the SVG mockups: the 600x800 reference is scaled to the
+ * real screen — body text = 16 * w/600, everything else keeps its SVG ratio
+ * (title 18/16, subtitle 13/16, hints 12/16, toolbar 21/16, footer 15/16). */
 void geometry_compute(Geometry *g, int w, int h, int dpi, int font_scale) {
     if (dpi <= 0) dpi = 167;
     if (w <= 0) w = 600;
     if (h <= 0) h = 800;
-    int scale = font_scale > 0 ? font_scale : (dpi + 50) / 100;
-    if (scale < 1) scale = 1;
-    if (scale > 4) scale = 4;
-    g->w = w; g->h = h; g->dpi = dpi; g->scale = scale;
-    g->cell_w = 8 * scale;
-    g->cell_h = 16 * scale;
-    g->line_h = g->cell_h + 6 * scale;   /* a little more air between lines */
-    g->margin_x = 2 * g->cell_w;
-    g->margin_y = g->cell_h;
+    int fs = 16;                        /* SVG body size */
+    if (font_scale == 1) fs = 14;
+    else if (font_scale == 3) fs = 18;
+    int body = fs * w / 600;
+    if (body < 16) body = 16;
+    if (body > 64) body = 64;
+    g->w = w; g->h = h; g->dpi = dpi;
+    g->scale = (w + 300) / 600;         /* stroke unit for rules, ~1..4 */
+    if (g->scale < 1) g->scale = 1;
+    if (g->scale > 4) g->scale = 4;
+    g->cell_w = body / 2;
+    g->cell_h = body;
+    g->line_h = body * 25 / 16;
+    g->margin_x = 32 * w / 600;
+    g->margin_y = 28 * h / 800;
+    g->top_h = 82 * h / 800;            /* toolbar rule y */
+    g->foot_y = 722 * h / 800;          /* footer rule y */
+    g->head_h = body * 21 / 16;
+    g->title_h = body * 18 / 16;
+    g->sub_h = body * 13 / 16;
+    g->small_h = body * 12 / 16;
+    g->foot_h = body * 15 / 16;
+    if (g->cell_w < 4) g->cell_w = 4;
     g->cols = (w - 2 * g->margin_x) / g->cell_w;
     if (g->cols < 12) g->cols = 12;
-    g->rows = (h - 2 * g->margin_y - 2 * g->line_h) / g->line_h;
+    int content = g->foot_y - g->top_h - body;
+    g->rows = content / g->line_h;
     if (g->rows < 4) g->rows = 4;
 }
 
