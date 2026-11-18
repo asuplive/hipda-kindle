@@ -1680,23 +1680,27 @@ static void settings_action(App *a, int line_index) {
             break;
         }
         case 2: {
-            /* toggle font: reading (Song + mono) <-> classic Unifont */
+            /* toggle font: reading (Song + mono) <-> classic Unifont.
+             * Build the other path from the CURRENT font's directory so the
+             * switch works no matter where the app is installed. */
             font_free(&a->font);
             const char *base = a->cfg.font_file;
-            const char *other = strstr(base, "reading")
-                ? (strstr(base, "/mnt/us/") ? "/mnt/us/hipda/fonts/unifont.bin"
-                                            : "fonts/unifont.bin")
-                : (strstr(base, "/mnt/us/") ? "/mnt/us/hipda/fonts/reading.bin"
-                                            : "fonts/reading.bin");
+            const char *fname = strstr(base, "reading")
+                                ? "unifont.bin" : "reading.bin";
+            char other[HIPDA_PATH_LEN];
+            const char *slash = strrchr(base, '/');
+            if (slash && slash != base)
+                snprintf(other, sizeof(other), "%.*s/%s",
+                         (int)(slash - base), base, fname);
+            else
+                snprintf(other, sizeof(other), "%s", fname);
             if (font_load(&a->font, other) == 0) {
                 str_copy(a->cfg.font_file, sizeof(a->cfg.font_file), other);
                 config_save(&a->cfg);
                 log_msg("font switched to %s", other);
             } else {
                 /* keep the old font usable */
-                const char *back = strstr(base, "reading")
-                    ? "fonts/reading.bin" : "fonts/unifont.bin";
-                font_load(&a->font, back);
+                font_load(&a->font, base);
                 app_draw(a, "字体文件缺失，已保留原字体");
                 return;
             }
