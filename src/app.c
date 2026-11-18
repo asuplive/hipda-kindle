@@ -3,6 +3,7 @@
 #include "config.h"
 #include "discuz.h"
 #include "font.h"
+#include "gbk.h"
 #include "html.h"
 #include "input.h"
 #include "layout.h"
@@ -114,6 +115,9 @@ typedef struct {
     int      in_fav;                   /* thread was opened from the favourites list */
     int      topic_page, topic_last;
     int      thread_page, thread_last;
+    int      thread_partial;          /* 1 = showing the first chunk while the
+                                       * rest of a large thread downloads */
+    int      last_fetch_partial;      /* set by fetch_or_message for the caller */
     int      since_flash;
     int      export_preview;
     int      msg_action;               /* 1 = message view is a quit-confirm */
@@ -365,6 +369,54 @@ static void app_message(App *a, const char *title, const char *body) {
  * result in its exit status.
  */
 #define JOB_CANCELLED (-100)
+#define JOB_PARTIAL   (-101)   /* early chunk shown; full download continues */
+
+/* A large thread is a ~250 KB HTML download, which is the only genuinely
+ * slow step (parse+layout take ~1 ms). While the child curl streams into its
+ * temp file we peek at the partial bytes; once enough complete posts exist
+ * to fill a screen we hand that chunk back immediately, so the reader sees
+ * page 1 right away while the rest keeps downloading into the cache. */
+/* child pid still filling the cache in background (int: no sys/types.h on PC) */
+static int g_bg_download = -1;
+
+static void reap_background(void) {
+#ifdef PC_BUILD
+    (void)0;                          /* no fork() in the PC preview build */
+#else
+    if (g_bg_download <= 0) return;
+    int st;
+    pid_t r = waitpid(g_bg_download, &st, WNOHANG);
+    if (r == g_bg_download || (r < 0 && errno == ECHILD)) {
+        log_msg("background download finished (pid=%d)", (int)g_bg_download);
+        g_bg_download = -1;
+    }
+#endif
+}
+
+#ifndef PC_BUILD
+/* Try the child's in-progress temp file. Returns 1 and fills `out` when it
+ * already holds at least `min_posts` parseable floors. */
+static int try_early_chunk(App *a, pid_t child, int min_posts, Str *out) {
+    char pp[HIPDA_PATH_LEN];
+    snprintf(pp, sizeof(pp), "%s/resp_%d.html", a->cfg.cache_dir, (int)child);
+    Str raw; str_init(&raw);
+    if (file_read(pp, &raw) || raw.len < 4096) { str_free(&raw); return 0; }
+    int utf8 = discuz_detect_utf8(raw.data, raw.len);
+    Str txt; str_init(&txt);
+    text_decode(raw.data, raw.len, utf8, &txt);
+    str_free(&raw);
+    ThreadPage probe;
+    int np = discuz_parse_thread(txt.data, &probe, 0, 1);
+    thread_page_free(&probe);
+    if (np < min_posts || !txt.len) { str_free(&txt); return 0; }
+    str_clear(out);
+    str_append(out, txt.data);
+    str_append(out, "");
+    str_free(&txt);
+    log_msg("early thread chunk: %d posts ready", np);
+    return 1;
+}
+#endif
 
 #ifdef PC_BUILD
 /* The PC preview build has no fork(): fetch synchronously. Cancellation only
@@ -403,6 +455,13 @@ static int fetch_async(App *a, const char *url, Str *html) {
 
     int st = 0;
     int result = 0;                  /* 0 = still running */
+    int polls = 0;
+    /* Only thread bodies benefit from an early chunk; lists must stay whole. */
+    int early_ok = strstr(url, "viewthread.php") != NULL;
+    /* enough posts to fill a screen: scale with available rows */
+    int min_posts = a->geo.rows > 0 ? (a->geo.rows / 4) : 8;
+    if (min_posts < 6) min_posts = 6;
+    if (min_posts > 12) min_posts = 12;
     while (result == 0) {
         pid_t w = waitpid(pid, &st, WNOHANG);
         if (w == pid) {
@@ -423,6 +482,14 @@ static int fetch_async(App *a, const char *url, Str *html) {
                 result = JOB_CANCELLED;
                 break;
             }
+        }
+        /* peek at the streaming download every ~600 ms; once a screenful of
+         * complete posts is available, show it and keep downloading */
+        if (early_ok && (++polls % 4) == 0 &&
+            try_early_chunk(a, pid, min_posts, html)) {
+            g_bg_download = pid;      /* reaped later in the main loop */
+            log_msg("fetch: early chunk served, full download continues in bg");
+            return JOB_PARTIAL;
         }
     }
 
@@ -450,9 +517,11 @@ static int fetch_async(App *a, const char *url, Str *html) {
  * still points at the screen we came from). Returns -1, or -2 if cancelled. */
 static int fetch_or_message(App *a, const char *url, Str *html, int refresh) {
     (void)refresh;
+    a->last_fetch_partial = 0;
     int r = fetch_async(a, url, html);
     if (r == JOB_CANCELLED) return -2;
-    if (r == NET_OK) return 0;
+    if (r == JOB_PARTIAL) a->last_fetch_partial = 1;
+    if (r == NET_OK || r == JOB_PARTIAL) return 0;
     const char *title = "无法读取论坛";
     char body[1024];
     if (r == NET_GATE) {
@@ -610,13 +679,17 @@ static int show_thread(App *a, int tid, int page, int append, int refresh) {
     Str html; str_init(&html);
     /* cache hit = instant open, no loading flash; refresh (top-right ring)
      * always goes to the network */
-    int fr = (!refresh && net_peek(&a->cfg, url, &html) == NET_OK)
-             ? 0 : fetch_or_message(a, url, &html, refresh);
+    int from_cache = (!refresh && net_peek(&a->cfg, url, &html) == NET_OK);
+    int fr = from_cache ? 0 : fetch_or_message(a, url, &html, refresh);
     if (fr) {
         str_free(&html);
         if (fr == -2 && !append) resume_after_cancel(a);
         return -1;
     }
+    /* A cache hit is always the complete page; only a live early chunk is
+     * partial. Keep downloading in the background so the next page turn can
+     * use the finished cache. */
+    int is_partial = (!from_cache && a->last_fetch_partial);
     ThreadPage thread;
     int n = discuz_parse_thread(html.data, &thread, tid, page);
     str_free(&html);
@@ -634,6 +707,17 @@ static int show_thread(App *a, int tid, int page, int append, int refresh) {
     thread_page_free(&thread);
     a->view = V_THREAD;
     if (!append) { a->page_index = 0; a->sel_line = -1; }
+    if (!append) a->thread_partial = is_partial;
+    if (is_partial) {
+        /* partial HTML has no footer, so last_page is unreliable — allow at
+         * least one more turn, which swaps in the completed cached page */
+        if (a->thread_last <= page) a->thread_last = page + 1;
+        book_wrap_text(&a->book, &a->geo, L_NOTE,
+                       "—— 后文正在后台加载，翻页即可继续 ——", 0, 0, page);
+        book_finalize(&a->book, &a->geo);
+        log_msg("thread shown from early chunk (%d posts), bg download pid=%d",
+                n, (int)g_bg_download);
+    }
     app_draw(a, NULL);
     return 0;
 }
@@ -1680,6 +1764,29 @@ static void settings_action(App *a, int line_index) {
 /* Turn one page. At the end of the current Discuz page, fetch the next one
  * and append it to the book so reading never hits a "next thread page" button. */
 static void turn_next(App *a) {
+    if (a->view == V_THREAD && a->thread_partial &&
+        a->page_index + 1 >= a->book.np) {
+        /* We only had the first chunk of this forum page. Wait for the
+         * background download to finish, then rebuild the FULL page from the
+         * cache and resume at the same page index — the remaining floors of
+         * this forum page appear seamlessly before any next-page fetch. */
+        int waited = 0;
+        while (g_bg_download > 0 && waited < 200) {
+            reap_background();
+#ifndef PC_BUILD
+            if (g_bg_download > 0) { usleep(100000); waited++; }
+#else
+            break;
+#endif
+        }
+        a->thread_partial = 0;
+        int keep = a->page_index;
+        if (!show_thread(a, a->cur_tid, a->thread_page, 0, 0)) {
+            if (keep < a->book.np) a->page_index = keep;
+            app_draw(a, NULL);
+        }
+        return;
+    }
     if (a->page_index + 1 < a->book.np) { a->page_index++; app_draw(a, NULL); return; }
     if (a->view == V_THREAD && a->thread_page < a->thread_last) {
         int next = a->thread_page + 1;
@@ -1990,10 +2097,12 @@ int app_run(const AppOptions *opt) {
 
     for (;;) {
         InputEvent ev;
+        reap_background();            /* collect finished partial-download children */
         /* No event (timeout) or a discarded drag must NOT repaint: the old
          * code redrew the whole page on every empty poll, which turned any
-         * gesture into a storm of full e-ink refreshes. */
-        if (input_read(&ev, 300000) <= 0) continue;
+         * gesture into a storm of full e-ink refreshes. Poll a little faster
+         * only while a background download is finishing. */
+        if (input_read(&ev, g_bg_download > 0 ? 1000 : 300000) <= 0) continue;
         /* touch panel speaks panel coordinates; rotate into logical space
          * before anything looks at ev.x/ev.y */
         if (a.cfg.rotation != 0 && ev.tap) rotate_touch(&a, &ev.x, &ev.y);
