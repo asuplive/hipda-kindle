@@ -245,6 +245,87 @@ void render_page(Canvas *c, Font *font, const Geometry *g, const Book *b,
                 font_draw_text(font, c, bx + 5 * scale, y, l->text, scale,
                                ink(theme, INK_BLACK), 1);
             }
+        } else if (l->kind == L_POSTHEAD) {
+            /* floor header: a thick left bar + small gray "N 楼 author time" */
+            canvas_rect(c, mx, y, 3 * scale, g->cell_h, ink(theme, INK_BLACK));
+            font_draw_text(font, c, x + g->cell_w / 2, y, l->text ? l->text : "",
+                           scale > 1 ? scale - 1 : scale,
+                           ink(theme, INK_GRAY), 0);
+        } else if (l->kind == L_GROUP) {
+            /* section caption: small solid square + bold label */
+            canvas_rect(c, x, y + scale, 3 * scale, 3 * scale,
+                        ink(theme, INK_BLACK));
+            font_draw_text(font, c, x + 5 * g->cell_w / 2, y, l->text ? l->text : "",
+                           scale, ink(theme, INK_BLACK), 1);
+        } else if (l->kind == L_CARD_T || l->kind == L_CARD_B) {
+            /* Framed card over two rows: thin outline, thick left bar,
+             * bold title + right chevron on top, small gray subtitle below.
+             * Either row pressed/selected inverts the WHOLE card. */
+            const Page *pg = &b->pages[page_index];
+            int is_top = (l->kind == L_CARD_T);
+            int mate = is_top ? i + 1 : i - 1;
+            int mate_ok = mate >= 0 && mate < pg->count &&
+                b->lines[pg->start + mate].kind == (is_top ? L_CARD_B : L_CARD_T);
+            int pressed = (i == press_line) || (mate_ok && mate == press_line);
+            int selected = (i == sel_line) || (mate_ok && mate == sel_line);
+            int invert = pressed || selected;
+            int dscale = scale > 1 ? scale - 1 : scale;
+            /* leave a small gap between cards, like the reference design */
+            int gap = 2 * scale;
+            int th = 2 * lh - gap;                 /* card spans two rows */
+            int top = y + scale;                   /* T row */
+            if (!is_top) top = y - lh + scale;     /* B row: find card top */
+            int cx = mx, cw = right - mx;
+            uint8_t line_col = invert ? ink(theme, INK_WHITE)
+                                      : ink(theme, INK_BLACK);
+            uint8_t t_col = invert ? ink(theme, INK_WHITE) : ink(theme, INK_BLACK);
+            uint8_t s_col = invert ? ink(theme, INK_WHITE) : ink(theme, INK_GRAY);
+            if (invert) {
+                canvas_rect(c, cx, top, cw, th, ink(theme, INK_BLACK));
+            } else {
+                /* frame: top + bottom + right; thick left bar */
+                canvas_hline(c, cx, top, cw, line_col, scale > 1 ? 2 : 1);
+                canvas_hline(c, cx, top + th - 1, cw, line_col, scale > 1 ? 2 : 1);
+                canvas_rect(c, right - scale, top, scale, th, line_col);
+                canvas_rect(c, cx, top, 3 * scale, th, line_col);
+            }
+            int tx = cx + 5 * g->cell_w / 2;
+            if (is_top) {
+                font_draw_text(font, c, tx, y, l->text ? l->text : "",
+                               scale, t_col, 1);
+                /* right chevron */
+                char chev[2] = { '>', 0 };
+                int cwch = font_text_width(font, chev, scale);
+                font_draw_text(font, c, right - 2 * g->cell_w - cwch, y,
+                               chev, scale, t_col, 0);
+            } else if (l->text && l->text[0] && mate_ok) {
+                int sy = y + (g->cell_h - 16 * dscale) / 2;
+                if (sy < y) sy = y;
+                font_draw_text(font, c, tx, sy, l->text, dscale, s_col, 0);
+            }
+        } else if (l->kind == L_NUM) {
+            /* numbered row: "NN" + title + chevron, whole row inverts on
+             * press / keyboard selection */
+            int pressed = (i == press_line);
+            int selected = (i == sel_line);
+            if (pressed || selected) {
+                canvas_rect(c, mx - scale, y - scale, right - mx + 2 * scale,
+                            g->cell_h + 2 * scale, ink(theme, INK_BLACK));
+            } else {
+                canvas_hline(c, mx, y + g->cell_h - scale, right - mx,
+                             ink(theme, INK_FAINT), scale > 1 ? 2 : 1);
+            }
+            uint8_t col = (pressed || selected) ? ink(theme, INK_WHITE)
+                                                : ink(theme, INK_BLACK);
+            const char *t = l->text ? l->text : "";
+            /* first two bytes are the 2-digit number, then a space */
+            char num[3] = { t[0], t[1], 0 };
+            font_draw_text(font, c, x, y, num, scale, col, 1);
+            font_draw_text(font, c, x + 4 * g->cell_w, y, t + 3, scale, col, 1);
+            char chev[2] = { '>', 0 };
+            int cwch = font_text_width(font, chev, scale);
+            font_draw_text(font, c, right - 2 * g->cell_w - cwch, y, chev, scale,
+                           col, 0);
         } else if (l->kind == L_FTITLE || l->kind == L_FDESC) {
             /* forum home: bold section title over a smaller, fainter
              * description. Both invert on press; the title also inverts

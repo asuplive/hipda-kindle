@@ -54,6 +54,52 @@ int book_add_line(Book *b, LineKind kind, const char *text, int indent,
     return b->n;
 }
 
+void book_add_card(Book *b, const char *title, const char *sub, int indent,
+                   int item_id, int forum_page) {
+    /* clip the title too: the card frame is one screen wide */
+    char ttl[HIPDA_NAME_LEN];
+    int tcells = b->cols > 4 ? b->cols - 5 : 20;
+    int cells = 0;
+    size_t used = 0;
+    const char *tp = title ? title : "";
+    while (*tp && used + 4 < sizeof(ttl)) {
+        unsigned char c = (unsigned char)*tp;
+        int w = 1, n = 1;
+        if (c >= 0xF0) { w = 2; n = 4; }
+        else if (c >= 0xE0) { w = 2; n = 3; }
+        else if (c >= 0xC0) { w = 1; n = 2; }
+        if (cells + w > tcells) break;
+        memcpy(ttl + used, tp, (size_t)n);
+        used += (size_t)n;
+        ttl[used] = 0;
+        cells += w;
+        tp += n;
+    }
+    if (*tp) memcpy(ttl + used, "...", 4);
+    push_line(b, L_CARD_T, xstrdup(ttl), indent, item_id, forum_page);
+    /* clip the subtitle to the card width so it never spills past the frame;
+     * the card is exactly two rows tall, no wrapping */
+    char clip[HIPDA_NAME_LEN];
+    int maxcells = b->cols > 4 ? b->cols - 4 : 20;
+    int scells = 0;
+    size_t sused = 0;
+    const char *p = sub ? sub : "";
+    while (*p && sused + 4 < sizeof(clip)) {
+        unsigned char c = (unsigned char)*p;
+        int w = 1, n = 1;
+        if (c >= 0xF0) { w = 2; n = 4; }
+        else if (c >= 0xE0) { w = 2; n = 3; }
+        else if (c >= 0xC0) { w = 1; n = 2; }
+        if (scells + w > maxcells - 2) break;
+        memcpy(clip + sused, p, (size_t)n);
+        sused += (size_t)n;
+        clip[sused] = 0;
+        scells += w;
+        p += n;
+    }
+    if (*p) memcpy(clip + sused, "...", 4);   /* truncated */
+    push_line(b, L_CARD_B, xstrdup(clip), indent, 0, forum_page);
+}
 /* Keep Chinese/ASCII closing punctuation attached to the previous line
  * instead of letting it dangle at the start of the next one. */
 static int is_closing_punct(uint32_t cp) {
@@ -106,15 +152,21 @@ void book_finalize(Book *b, const Geometry *g) {
     b->np = 0;
     b->rows = g->rows;
     int rows = g->rows < 1 ? 1 : g->rows;
-    for (int i = 0; i < b->n; i += rows) {
+    for (int i = 0; i < b->n; ) {
         if (b->np == b->pcap) {
             b->pcap = b->pcap ? b->pcap * 2 : 16;
             b->pages = xrealloc(b->pages, (size_t)b->pcap * sizeof(Page));
         }
+        int count = b->n - i < rows ? b->n - i : rows;
+        /* never split a L_CARD_T / L_CARD_B pair across pages */
+        if (count > 0 && count < rows &&
+            b->lines[i + count - 1].kind == L_CARD_T) count--;
+        if (count == 0) count = rows < b->n - i ? rows : b->n - i;
         Page *pg = &b->pages[b->np++];
         pg->start = i;
-        pg->count = b->n - i < rows ? b->n - i : rows;
+        pg->count = count;
         pg->forum_page = b->lines[i].forum_page;
+        i += count;
     }
     if (b->np == 0) {
         b->pcap = 1;
@@ -158,19 +210,24 @@ int book_from_forums(Book *b, const Geometry *g, const Config *cfg) {
     str_copy(b->subtitle, sizeof(b->subtitle), "选择板块");
     b->fid = 0; b->tid = 0;
     /* The page header already shows b->title; do not repeat it in the body. */
-    book_wrap_text(b, g, L_NOTE, "点板块名进入 · 左上角 Hi 菜单", 0, 0, 1);
-    book_add_line(b, L_BLANK, "", 0, 0, 1);
+    book_wrap_text(b, g, L_NOTE, "按类别浏览板块 · 点卡片进入", 0, 0, 1);
     for (unsigned i = 0; i < sizeof(kHomeForums) / sizeof(kHomeForums[0]); i++) {
-        if (!kHomeForums[i].name) {       /* separator between groups */
+        if (!kHomeForums[i].name) {       /* group caption */
             book_add_line(b, L_BLANK, "", 0, 0, 1);
-            book_add_line(b, L_SEP, "", 0, 0, 1);
             continue;
         }
-        char row[HIPDA_NAME_LEN];
-        snprintf(row, sizeof(row), "· %s", kHomeForums[i].name);
-        book_add_line(b, L_FTITLE, row, 0, kHomeForums[i].fid, 1);
-        if (kHomeForums[i].desc && kHomeForums[i].desc[0])
-            book_wrap_text(b, g, L_FDESC, kHomeForums[i].desc, 1, 0, 1);
+        /* a group caption precedes the hot boards and the 苹果 board */
+        if (kHomeForums[i].fid == 2)
+            book_add_line(b, L_GROUP, "热门推荐", 0, 0, 1);
+        if (kHomeForums[i].fid == 7)
+            book_add_line(b, L_GROUP, "数码与系统", 0, 0, 1);
+        if (kHomeForums[i].fid == 56)
+            book_add_line(b, L_GROUP, "苹果专区", 0, 0, 1);
+        if (kHomeForums[i].fid == 50)
+            book_add_line(b, L_GROUP, "其他", 0, 0, 1);
+        book_add_card(b, kHomeForums[i].name,
+                      kHomeForums[i].desc ? kHomeForums[i].desc : "进入板块",
+                      0, kHomeForums[i].fid, 1);
     }
     book_finalize(b, g);
     return b->n;
@@ -207,14 +264,13 @@ int book_from_topics(Book *b, const Geometry *g, const TopicList *list,
     for (int i = 0; i < list->n; i++) {
         const Topic *t = &list->v[i];
         char row[HIPDA_NAME_LEN];
-        snprintf(row, sizeof(row), "%s%s", t->is_sticky ? "[顶] " : "  ",
+        snprintf(row, sizeof(row), "%s%s", t->is_sticky ? "〔顶〕" : "",
                  t->title[0] ? t->title : "(无标题)");
-        book_wrap_text(b, g, L_ITEM, row, 0, t->tid, list->page);
         char meta[256];
-        snprintf(meta, sizeof(meta), "     %s  ·  回复 %d%s",
+        snprintf(meta, sizeof(meta), "%s  ·  回复 %d%s",
                  t->author[0] ? t->author : "匿名", t->replies,
                  t->has_attach ? "  · 有图" : "");
-        book_add_line(b, L_META, meta, 0, t->tid, list->page);
+        book_add_card(b, row, meta, 0, t->tid, list->page);
     }
     book_finalize(b, g);
     return b->n;
@@ -279,7 +335,7 @@ int book_from_thread(Book *b, const Geometry *g, const ThreadPage *thread,
         snprintf(meta, sizeof(meta), "%d 楼  %s  %s", p->floor,
                  p->author[0] ? p->author : "匿名", p->dateline);
         if (i > 0 || append) book_add_line(b, L_SEP, "", 0, 0, thread->page);
-        book_wrap_text(b, g, L_META, meta, 0, 0, thread->page);
+        book_add_line(b, L_POSTHEAD, meta, 0, 0, thread->page);
         book_add_body(b, g, p->body.data, thread->page, img_urls, img_mode);
         book_add_line(b, L_BLANK, "", 0, 0, thread->page);
     }
@@ -357,10 +413,10 @@ int book_from_menu(Book *b, const Geometry *g, const char *title,
     b->fid = 0; b->tid = 0;
     for (int i = 0; i < n; i++) {
         char row[HIPDA_NAME_LEN];
-        snprintf(row, sizeof(row), "%d  %s", i + 1, items[i] ? items[i] : "");
-        /* bold (L_TITLE): menu rows should be big and easy to hit */
-        book_wrap_text(b, g, L_TITLE, row, 0, i + 1, 1);
-        book_add_line(b, L_BLANK, "", 0, 0, 1);   /* spacing = fewer mis-taps */
+        /* "NN " + title: the L_NUM painter reads the first two chars as the
+         * index badge and the rest as the bold label. */
+        snprintf(row, sizeof(row), "%02d %s", i + 1, items[i] ? items[i] : "");
+        book_add_line(b, L_NUM, row, 0, i + 1, 1);
     }
     book_finalize(b, g);
     return b->n;

@@ -21,7 +21,12 @@ typedef enum {
     L_IMGPH,       /* image placeholder row; item_id = URL hash */
     L_CAND,        /* pinyin candidate row: up to 8 boxed UTF-8 chars */
     L_FTITLE,      /* forum-home section title: bold, item_id = fid */
-    L_FDESC        /* forum-home description: small + faint, item_id = 0 */
+    L_FDESC,       /* forum-home description: small + faint, item_id = 0 */
+    L_GROUP,       /* section caption: small solid square + bold label */
+    L_CARD_T,      /* card top row: bold title + right chevron, item_id=id */
+    L_CARD_B,      /* card bottom row: small gray subtitle (pairs with T) */
+    L_NUM,         /* numbered item row: "NN" + title + chevron (menu/settings) */
+    L_POSTHEAD     /* post floor header: gray text with a thick left bar */
 } LineKind;
 
 /* Keyboard geometry contract shared by painter and hit-test:
@@ -57,6 +62,13 @@ typedef struct {
     int   fid, tid;
     int   cols, rows;
 } Book;
+
+/* Add a framed card occupying two rows (title + subtitle). item_id on the
+ * title row makes the whole card tappable; the subtitle row has id 0 and
+ * hit-testing falls through to the title above it. */
+void book_add_card(Book *b, const char *title, const char *sub, int indent,
+                   int item_id, int forum_page);
+
 
 void geometry_compute(Geometry *g, int w, int h, int dpi, int font_scale);
 
