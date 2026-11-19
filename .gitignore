@@ -26,3 +26,6 @@ check.txt
 .DS_Store
 Thumbs.db
 *.swp
+
+# Local screenshots (may contain real forum content)
+outputs/
