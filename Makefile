@@ -19,7 +19,7 @@ CFLAGS_PC := -std=c99 -DPC_BUILD -Wall -O1 -g
 CFLAGS_K  := -std=c99 -DKINDLE_BUILD -Wall -Os
 
 COMMON := src/util.c src/gbk.c src/html.c src/discuz.c src/raster.c \
-          src/font.c src/layout.c src/render.c src/config.c src/md5.c \
+          src/font.c src/font_ttf.c src/layout.c src/render.c src/config.c src/md5.c \
           src/image.c src/app.c src/tests.c src/main.c
 PC_SRC     := src/ui_stub.c src/input_stub.c src/net_stub.c
 KINDLE_SRC := src/ui_fbink.c src/input_evdev.c src/net_curl.c

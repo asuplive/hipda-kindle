@@ -22,6 +22,9 @@ typedef struct Font {
 } Font;
 
 int  font_load(Font *f, const char *path);
+/* Standard TTF/OTF/TTC support (src/font_ttf.c) — no conversion needed. */
+int  font_is_ttf(const uint8_t *data, size_t len);
+int  font_load_ttf(Font *f, Str *raw);   /* takes ownership of raw on success */
 void font_free(Font *f);
 const uint8_t *font_glyph(Font *f, uint32_t cp);  /* 32 bytes or NULL */
 

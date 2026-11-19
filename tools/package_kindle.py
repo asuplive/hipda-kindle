@@ -12,6 +12,9 @@ import json
 import os
 import re
 import zipfile
+import glob
+import subprocess
+import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PKG = os.path.join(ROOT, "kual", "hipda")
@@ -40,6 +43,15 @@ def latest_manifest():
 
 
 def main() -> int:
+    # Auto-convert any standard TTF/OTF dropped into fonts/ into the HUF1
+    # format the reader uses. No manual conversion step needed.
+    prep = os.path.join(ROOT, "tools", "prepare_fonts.py")
+    if os.path.exists(prep):
+        r = subprocess.run([sys.executable, prep], cwd=ROOT)
+        if r.returncode:
+            print("font preparation failed", file=sys.stderr)
+            return 2
+
     # Everything is READ here and the zip gets a fresh name: this sandbox
     # only allows the first write to any path, so never touch locked copies.
     seq, mpath = latest_manifest()
@@ -48,10 +60,12 @@ def main() -> int:
         return 2
     manifest = json.load(open(mpath, encoding="utf-8"))
     src = os.path.join(ROOT, manifest["binary"])
-    font = os.path.join(ROOT, "fonts", "unifont.bin")
-    reading_font = os.path.join(ROOT, "fonts", "reading.bin")
+    font_bins = []
+    for pat in ("*.bin", "*.ttf", "*.otf", "*.ttc", "*.TTF", "*.OTF", "*.TTC"):
+        font_bins += glob.glob(os.path.join(ROOT, "fonts", pat))
+    font_bins = sorted(font_bins)
     readme = os.path.join(ROOT, "README.md")
-    for p in (src, font, reading_font, readme):
+    for p in [src, readme] + font_bins:
         if not os.path.exists(p):
             print("missing", p, file=__import__("sys").stderr)
             return 2
@@ -70,13 +84,14 @@ def main() -> int:
                 continue
             full = os.path.join(base, n)
             rel = os.path.relpath(full, PKG).replace("\\", "/")
-            if rel in ("bin/hipda", "fonts/unifont.bin", "fonts/reading.bin"):
-                continue          # stale copies; the fresh ones are appended below
+            if rel == "bin/hipda" or (rel.startswith("fonts/") and
+                    n.lower().endswith((".bin", ".ttf", ".otf", ".ttc"))):
+                continue          # stale copies; fresh ones come from fonts/ only
             files.append((full, rel))
     files.append((cfg_source, "config.ini"))   # newest credentials, if generated
     files.append((src, "bin/hipda"))           # the freshly linked binary
-    files.append((font, "fonts/unifont.bin"))
-    files.append((reading_font, "fonts/reading.bin"))
+    for fb in font_bins:
+        files.append((fb, "fonts/" + os.path.basename(fb)))
     files.append((readme, "README.md"))
     files.sort(key=lambda x: x[1])
 
@@ -94,8 +109,8 @@ def main() -> int:
         (manifest.get("lib", "libfbink") + " (ARM static lib)",
          sha256(os.path.join(ROOT, manifest["lib"])) if
          os.path.exists(os.path.join(ROOT, manifest.get("lib", ""))) else "n/a"),
-        ("unifont.bin (font)", sha256(font)),
-        ("reading.bin (font)", sha256(reading_font)),
+        ("unifont.bin (font)", sha256(os.path.join(ROOT, "fonts", "unifont.bin"))),
+        ("reading.bin (font)", sha256(os.path.join(ROOT, "fonts", "reading.bin"))),
     ]
     sums = [s for s in sums if s[1] != "n/a"]
     sums_path = os.path.join(BUILD, "SHA256SUMS_%d.txt" % seq)

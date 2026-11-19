@@ -1318,7 +1318,13 @@ static int font_cycle(App *a, int which) {
         struct dirent *de;
         while ((de = readdir(d)) && n < 24) {
             size_t ln = strlen(de->d_name);
-            if (ln < 5 || strcmp(de->d_name + ln - 4, ".bin")) continue;
+            /* accept standard fonts too - the reader loads them directly */
+            int is_font = ln > 4 && (
+                !strcmp(de->d_name + ln - 4, ".bin") ||
+                !strcmp(de->d_name + ln - 4, ".ttf") ||
+                !strcmp(de->d_name + ln - 4, ".otf") ||
+                !strcmp(de->d_name + ln - 4, ".ttc"));
+            if (!is_font) continue;
             int dup = 0;
             for (int i = 0; i < n; i++) {
                 const char *slash = strrchr(paths[i], '/');

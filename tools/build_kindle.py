@@ -30,7 +30,7 @@ VENDOR = os.path.join(ROOT, "vendor", "FBInk")
 
 APP_SRCS = [
     "src/util.c", "src/gbk.c", "src/html.c", "src/discuz.c", "src/raster.c",
-    "src/font.c", "src/layout.c", "src/render.c", "src/config.c",
+    "src/font.c", "src/font_ttf.c", "src/layout.c", "src/render.c", "src/config.c",
     "src/md5.c", "src/app.c", "src/tests.c", "src/main.c",
     "src/ui_fbink.c", "src/input_evdev.c", "src/net_curl.c",
 ]
@@ -191,7 +191,7 @@ def main() -> int:
 
     base = cc + ["-target", TARGET, "-mcpu=" + ARM_CPU, "-std=gnu99", "-Os",
                  "-ffunction-sections", "-fdata-sections",
-                 "-Iinclude", "-Isrc", "-Ivendor/FBInk", "-Ivendor/FBInk/stb"] + DEFS
+                 "-Iinclude", "-Isrc", "-Ivendor", "-Ivendor/FBInk", "-Ivendor/FBInk/stb"] + DEFS
 
     print("target:", TARGET, "cpu:", ARM_CPU)
     print("compiler:", " ".join(cc))

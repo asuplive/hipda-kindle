@@ -15,8 +15,21 @@ int font_load(Font *f, const char *path) {
     memset(f, 0, sizeof(*f));
     f->ascii_src = ascii_src;
     Str raw; str_init(&raw);
-    if (file_read(path, &raw) || raw.len < 20 || memcmp(raw.data, "HUF1", 4)) {
-        log_msg("font: cannot load %s (bad or missing HUF1 file)", path);
+    if (file_read(path, &raw) || raw.len < 20) {
+        log_msg("font: cannot read %s", path);
+        str_free(&raw);
+        return -1;
+    }
+    /* Standard TTF/OTF/TTC files placed in fonts/ work directly: rasterise
+     * them into the HUF-shaped in-memory table. No conversion step needed. */
+    if (font_is_ttf((const uint8_t *)raw.data, raw.len)) {
+        log_msg("font: %s is a standard font, rasterising on load", path);
+        if (font_load_ttf(f, &raw) == 0) return 0;
+        str_free(&raw);
+        return -1;
+    }
+    if (memcmp(raw.data, "HUF1", 4)) {
+        log_msg("font: %s is neither HUF1 nor a supported TTF/OTF", path);
         str_free(&raw);
         return -1;
     }

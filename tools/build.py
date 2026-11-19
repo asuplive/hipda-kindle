@@ -17,7 +17,7 @@ EXE = os.path.join(ROOT, "hipda-pc.exe" if os.name == "nt" else "hipda-pc")
 
 COMMON = [
     "src/util.c", "src/gbk.c", "src/html.c", "src/discuz.c", "src/raster.c",
-    "src/font.c", "src/layout.c", "src/render.c", "src/config.c",
+    "src/font.c", "src/font_ttf.c", "src/layout.c", "src/render.c", "src/config.c",
     "src/md5.c", "src/image.c", "src/app.c", "src/tests.c", "src/main.c",
 ]
 PC_SRC = ["src/ui_stub.c", "src/input_stub.c", "src/net_stub.c"]
@@ -108,7 +108,7 @@ def main() -> int:
     for src in COMMON + PC_SRC:
         out = os.path.join(objdir, os.path.basename(src) + ".obj")
         if run(cc + ["-std=c99", "-DPC_BUILD", "-Wall", "-O1", "-g",
-                     "-Iinclude", "-Isrc", "-c", src, "-o", out]):
+                     "-Iinclude", "-Isrc", "-Ivendor", "-c", src, "-o", out]):
             print("compile FAILED:", src, file=sys.stderr)
             failed = True
             break
@@ -116,7 +116,7 @@ def main() -> int:
     if failed:
         return 1
     if run(cc + ["-std=c99", "-DPC_BUILD", "-Wall", "-O1", "-g",
-                 "-Iinclude", "-Isrc", "-o", EXE] + objs + ["-lm"]):
+                 "-Iinclude", "-Isrc", "-Ivendor", "-o", EXE] + objs + ["-lm"]):
         print("link FAILED", file=sys.stderr)
         return 1
     print("built:", EXE)

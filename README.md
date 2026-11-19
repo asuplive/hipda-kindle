@@ -111,26 +111,22 @@ KUAL menu.json
 | 10 | 切换主题 | 白底黑字 ↔ 黑底白字，立即生效并写回 config.ini |
 | 11 | **退出应用** | 明确退出，触摸交还系统 |
 
-**字体（中英文分开，可自定义）**：设置页有「中文字体」「英文字体」两行，点按即在 `fonts/` 目录里所有 `.bin` 字体之间循环，**即时生效**：
+**字体（中英文分开，标准字体直接用）**：设置页有「中文字体」「英文字体」两行，点按即在 `fonts/` 目录里所有字体文件之间循环，**即时生效**：
 
-内置字体：
-- **中文**：宋体（标准，默认）、黑体、楷体、雅黑、Unifont 经典点阵
-- **英文**：Consolas 等宽（默认）、Arial 无衬线、Unifont 点阵
+- 内置：中文宋体（默认）/ 黑体 / 楷体 / 雅黑，英文 Consolas（默认）/ Arial —— 预渲染的 `.bin`，启动最快
+- 同时附带同名标准字体文件：`cn_song.ttf`、`en_consolas.ttf`（**程序直接读取 TTF，无需任何转化**）
 
-所有字体都是 32px 高清点阵（`HUF1` 格式），工具有中文字形全集 6763 字，英文按字符宽度渲染，长文阅读清晰。设置页「字号」可设 自动/小/中/大。
+**直接用标准字体**：把任意 `.ttf` / `.otf` / `.ttc` 拷进 `extensions/hipda/fonts/`，程序会自动识别并在设置页列出，点选即用——**不需要转换、不需要命令行工具**。内部用内联的 stb_truetype 光栅化，不依赖系统字体库或 FreeType。
 
-**导入自己的字体**：把任意 `.ttf/.otf/.ttc` 转成 HUF1 放进 `fonts/` 即可在设置页里选到：
-
-```bash
-# 中文字体（含 GB2312 全集，约 1MB）
-python tools/import_font.py C:/Windows/Fonts/simfang.ttf fonts/cn_fang.bin --cjk-only --label 仿宋
-# 英文字体（仅 ASCII/拉丁，约 68KB）
-python tools/import_font.py C:/Windows/Fonts/georgia.ttf fonts/en_georgia.bin --ascii-only --label Georgia
-# 中西文都包含的完整字体
-python tools/import_font.py MyFont.ttf fonts/myfont.bin --cjk --label MyFont
+```
+config.ini 示例：
+font_file=/mnt/us/extensions/hipda/fonts/我的字体.ttf
+font_en=/mnt/us/extensions/hipda/fonts/我的英文.otf
 ```
 
-转换后把 `.bin` 拷到 Kindle 的 `extensions/hipda/fonts/` 下，设置页即可切换。也可以在 `config.ini` 里直接写 `font_file=`（中文）和 `font_en=`（英文）指定路径。
+命名约定仅影响字形覆盖范围，不影响能否使用：`cn_*` 加载中文全集，`en_*` 只加载 ASCII/拉丁，其他名字加载中西文全集。`font_file=` 是中文，`font_en=` 是英文。字号在「字号」一项设 自动/小/中/大。
+
+**可选的加速**：若想让某个字体启动更快，可用 `tools/import_font.py` 预先转成 `.bin`（`python tools/import_font.py 字体.ttf fonts/字体.bin --cjk-only`）——但这一步**完全可选**，不放也照常工作。
 
 **缓存策略**：所有列表和帖子命中本机缓存时**直接显示**，不闪加载页；没缓存的帖子走异步拉取、拉完再显示，并自动写入缓存；只有点右上角刷新圆圈才强制联网拉取最新内容。
 
