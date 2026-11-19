@@ -316,6 +316,19 @@ static void test_malformed(void) {
     CHECK(1, "256 random inputs survived without crashing");
 }
 
+static void test_font_ttf_detect(void) {
+    printf("[font / standard TTF detection]\n");
+    const uint8_t truetype[] = { 0x00,0x01,0x00,0x00, 0,1,2,3,4,5,6,7 };
+    const uint8_t opentype[] = { 'O','T','T','O', 0,1,2,3,4,5,6,7 };
+    const uint8_t ttc[]      = { 't','t','c','f', 0,1,2,3,4,5,6,7 };
+    const uint8_t huf[]      = { 'H','U','F','1', 1,16,16,2,36,0,1,0 };
+    CHECK(font_is_ttf(truetype, sizeof(truetype)) == 1, "TrueType header detected");
+    CHECK(font_is_ttf(opentype, sizeof(opentype)) == 1, "OpenType header detected");
+    CHECK(font_is_ttf(ttc, sizeof(ttc)) == 1, "TTC collection detected");
+    CHECK(font_is_ttf(huf, sizeof(huf)) == 0, "HUF1 not mistaken for TTF");
+    CHECK(font_is_ttf(truetype, 2) == 0, "short buffer rejected");
+}
+
 static void test_font_raster(void) {
     printf("[font / raster]\n");
     Font f; memset(&f, 0, sizeof(f));
@@ -353,6 +366,7 @@ int app_selftest(void) {
     test_discuz();
     test_layout();
     test_malformed();
+    test_font_ttf_detect();
     test_font_raster();
     printf("-------------------------------\n");
     printf("%d checks, %d failures\n", g_checks, g_fails);

@@ -1340,23 +1340,25 @@ static int font_cycle(App *a, int which) {
         if (!strcmp(paths[i], cur)) { at = i; break; }
     const char *next = paths[(at + 1) % n];
 
+    /* Load ONCE into a temp font, then swap it in. TTF rasterisation is
+     * expensive on ARM (~1s), so never load the same file twice. */
+    Font tmp; memset(&tmp, 0, sizeof(tmp));
+    tmp.ascii_src = which ? NULL : a->font.ascii_src;   /* keep EN link for CN */
+    if (font_load(&tmp, next) != 0 || !tmp.records) {
+        font_free(&tmp);
+        return 0;                       /* keep the current font usable */
+    }
     if (which) {
-        Font tmp; memset(&tmp, 0, sizeof(tmp));
-        int ok = (font_load(&tmp, next) == 0 && tmp.records);
-        font_free(&tmp);
-        if (ok) {
-            font_load(&a->font_en, next);
-            a->font.ascii_src = &a->font_en;
-            str_copy(a->cfg.font_en, sizeof(a->cfg.font_en), next);
-        }
+        /* Re-link: a.font.ascii_src must point at the NEW EN font object. */
+        tmp.ascii_src = NULL;
+        font_free(&a->font_en);
+        a->font_en = tmp;
+        a->font.ascii_src = &a->font_en;
+        str_copy(a->cfg.font_en, sizeof(a->cfg.font_en), next);
     } else {
-        Font tmp; memset(&tmp, 0, sizeof(tmp));
-        int ok = (font_load(&tmp, next) == 0 && tmp.records);
-        font_free(&tmp);
-        if (ok) {
-            font_load(&a->font, next);   /* preserves ascii_src */
-            str_copy(a->cfg.font_file, sizeof(a->cfg.font_file), next);
-        }
+        font_free(&a->font);
+        a->font = tmp;
+        str_copy(a->cfg.font_file, sizeof(a->cfg.font_file), next);
     }
     config_save(&a->cfg);
     snap_invalidate_all(a);
@@ -2145,6 +2147,30 @@ static int export_sequence(App *a) {
 }
 
 int app_run(const AppOptions *opt) {
+    /* --font-list: show every font the reader can discover. Works with
+     * standard TTF/OTF/TTC dropped into fonts/ - no conversion needed. */
+    if (opt->font_list) {
+        const char *dirs[] = { "fonts", "/mnt/us/extensions/hipda/fonts",
+                               "/mnt/us/hipda/fonts" };
+        for (unsigned d = 0; d < sizeof(dirs) / sizeof(dirs[0]); d++) {
+            DIR *dp = opendir(dirs[d]);
+            if (!dp) continue;
+            printf("[%s]\n", dirs[d]);
+            struct dirent *de;
+            while ((de = readdir(dp))) {
+                const char *n = de->d_name;
+                size_t ln = strlen(n);
+                int isfont = ln > 4 && (
+                    !strcmp(n + ln - 4, ".bin") || !strcmp(n + ln - 4, ".ttf") ||
+                    !strcmp(n + ln - 4, ".otf") || !strcmp(n + ln - 4, ".ttc"));
+                if (isfont) printf("  %s\n", n);
+            }
+            closedir(dp);
+            return 0;
+        }
+        printf("no fonts directory found\n");
+        return 1;
+    }
     App a;
     memset(&a, 0, sizeof(a));
     config_defaults(&a.cfg,

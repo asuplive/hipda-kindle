@@ -11,6 +11,7 @@ typedef struct {
     int  no_login;
     int  diag;                 /* draw a high-contrast panel test, no font/net */
     int  dump_url;             /* print one decoded URL response and exit */
+    int  font_list;            /* list discoverable fonts and exit */
     const char *dump_target;
 } AppOptions;
 

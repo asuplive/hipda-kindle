@@ -15,6 +15,7 @@ static void usage(const char *exe) {
            "  --diag           show a high-contrast screen test (no font/net)\n"
            "  --dump PATH      fetch one forum path, print decoded UTF-8 to stdout\n"
            "  --export         render every screen and write preview/pages.json (PC)\n"
+           "  --font-list      list all usable font files in fonts/ and exit\n"
            "  --selftest       run parser/layout/font regression checks (PC)\n"
            "  --version\n", HIPDA_VERSION, exe);
 }
@@ -32,6 +33,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(a, "--no-login")) opt.no_login = 1;
         else if (!strcmp(a, "--diag")) opt.diag = 1;
         else if (!strcmp(a, "--export")) opt.export_preview = 1;
+        else if (!strcmp(a, "--font-list")) opt.font_list = 1;
         else if (!strcmp(a, "--selftest")) opt.selftest = 1;
         else if (!strcmp(a, "--version")) { printf("%s\n", HIPDA_VERSION); return 0; }
         else if (!strcmp(a, "--help") || !strcmp(a, "-h")) { usage(argv[0]); return 0; }
