@@ -329,6 +329,19 @@ void render_page(Canvas *c, Font *font, const Geometry *g, const Book *b,
                 font_draw_text(font, c, right - 12 * g->w / 600, y,
                                "›", th_title, t_col, invert ? 2 : 0);
             } else if (l->text && l->text[0] && mate_ok) {
+                /* B row is painted AFTER its T row; its full-card inverted
+                 * rectangle covers the title glyphs just drawn. Re-draw the
+                 * title on top so the selected card's title stays visible. */
+                if (invert) {
+                    const Line *top_line = &b->lines[pg2->start + mate];
+                    int ty2 = top - scale + (lh - th_title) / 2;
+                    if (ty2 < top) ty2 = top;
+                    font_draw_text(font, c, tx, ty2,
+                                   top_line->text ? top_line->text : "",
+                                   th_title, t_col, 2);
+                    font_draw_text(font, c, right - 12 * g->w / 600, ty2,
+                                   "›", th_title, t_col, 2);
+                }
                 int sy = y + (lh - th_sub) / 2;
                 if (sy < y) sy = y;
                 font_draw_text(font, c, tx, sy, l->text, th_sub, s_col,
