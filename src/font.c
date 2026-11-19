@@ -43,7 +43,8 @@ int font_load(Font *f, const char *path) {
     raw.data = NULL; raw.len = raw.cap = 0;
     int glyph_bytes = f->glyph_h * f->row_bytes;
     uint32_t want_rec = (uint32_t)glyph_bytes + 4;
-    int ok = (f->glyph_h == 16 || f->glyph_h == 32) &&
+    int ok = (f->glyph_h == 16 || f->glyph_h == 32 ||
+              f->glyph_h == 40 || f->glyph_h == 48) &&
              f->row_bytes == f->glyph_h / 8 &&
              f->rec_size == want_rec &&
              f->count > 0 &&
@@ -113,26 +114,51 @@ static void draw_glyph(Font *f, Canvas *c, int x, int y, uint32_t cp,
     }
     int srcw = W / 2 * cells;                /* source columns in use */
     if (srcw > W) srcw = W;
-    for (int row = 0; row < th; row++) {
+    /* Find the glyph's real ink rows. Font cells reserve ascender/descender
+     * space, so a plain cell-centred draw looks too high for lowercase text
+     * and too low for CJK. Align the INK centre to the target box centre. */
+    int ink_top = H, ink_bot = -1;
+    for (int r = 0; r < H; r++) {
+        const uint8_t *rp = bmp + (size_t)r * f->row_bytes;
+        int any = 0;
+        for (int b = 0; b < f->row_bytes; b++) if (rp[b]) { any = 1; break; }
+        if (any) { if (r < ink_top) ink_top = r; if (r > ink_bot) ink_bot = r; }
+    }
+    /* Translate only: keep the glyph's natural proportions. The ink centre
+     * in source space is mapped to the target box centre as a small shift. */
+    int y_shift = 0;                         /* pixel offset within target box */
+    if (ink_bot >= ink_top) {
+        double ink_center = (ink_top + ink_bot + 1) / 2.0;
+        double cell_center = H / 2.0;
+        y_shift = (int)((cell_center - ink_center) * th / H);
+        if (y_shift > th / 4) y_shift = th / 4;
+        if (y_shift < -th / 4) y_shift = -th / 4;
+    }
+    int draw_h = th;
+    for (int row = 0; row < draw_h; row++) {
         int srow = row * H / th;
         const uint8_t *rp = bmp + (size_t)srow * f->row_bytes;
         uint32_t bits = 0;
-        for (int b = 0; b < f->row_bytes; b++)
+        for (int b = 0; b < f->row_bytes && b < 4; b++)
             bits = (bits << 8) | rp[b];
-        bits <<= (32 - W);       /* MSB-align: bit31 = leftmost source col */
+        if (W < 32) bits <<= (32 - W);   /* MSB-align for narrow fonts */
         if (!bits) continue;
-        int yy = y + row;
+        int yy = y + y_shift + row;
         if (yy < 0 || yy >= c->h) continue;
+        /* read a source column directly from the row bytes (works for
+         * glyphs wider than 32 columns too) */
+#define GLYPH_BIT(rp, rb, sc) ((rp[(sc) / 8] >> (7 - ((sc) % 8))) & 1u)
         int col = 0;
         while (col < gw) {
             int sc = col * srcw / gw;
-            if (!(bits & (0x80000000u >> sc))) { col++; continue; }
+            if (!GLYPH_BIT(rp, f->row_bytes, sc)) { col++; continue; }
             int start = col;
             while (col < gw) {
                 sc = col * srcw / gw;
-                if (!(bits & (0x80000000u >> sc))) break;
+                if (!GLYPH_BIT(rp, f->row_bytes, sc)) break;
                 col++;
             }
+#undef GLYPH_BIT
             /* horizontal run [start, col) at one source row */
             int bx = x + start, bw = col - start;
             if (bx < 0) { bw += bx; bx = 0; }

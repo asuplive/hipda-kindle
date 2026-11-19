@@ -333,9 +333,21 @@ void render_page(Canvas *c, Font *font, const Geometry *g, const Book *b,
             }
         } else if (l->kind == L_NUM) {
             /* SVG 07-settings: numbered card, 50px @600 (~2 rows), thin frame
-             * + thick left bar; selected/pressed inverts the whole card. */
-            int pressed = (i == press_line);
-            int selected = (i == sel_line);
+             * + thick left bar; selected/pressed inverts the whole card.
+             * book_from_menu() adds a BLANK pad row after each item carrying
+             * the same item_id, so selection landing on it still lights this
+             * card up. */
+            int mate_sel = 0, mate_press = 0;
+            if (l->item_id > 0 && pg) {
+                for (int k = 0; k < pg->count; k++) {
+                    const Line *sib = &b->lines[pg->start + k];
+                    if (sib->item_id != l->item_id) continue;
+                    if (k == sel_line) mate_sel = 1;
+                    if (k == press_line) mate_press = 1;
+                }
+            }
+            int pressed = (i == press_line) || mate_press;
+            int selected = (i == sel_line) || mate_sel;
             int gap = 6 * g->w / 600;            /* SVG card gap */
             int hh = 2 * lh - gap;
             int top = y - scale;

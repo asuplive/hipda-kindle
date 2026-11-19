@@ -53,17 +53,18 @@ def gb2312_codepoints():
 
 
 def render_glyph(font, ch, fullwidth):
-    """Render one glyph into a 32-row HUF bitmap (each row 4 bytes, MSB left)."""
-    img = Image.new('L', (40, 40), 0)
+    """Render one glyph into a ROWS-row HUF bitmap (MSB-left, ROW_BYTES/row)."""
+    W = ROWS                          # full cell width in columns
+    img = Image.new('L', (W + 8, ROWS + 8), 0)
     d = ImageDraw.Draw(img)
     d.text((0, 1), ch, font=font, fill=255)
     px = img.load()
     rows = []
-    for y in range(40):
+    for y in range(ROWS + 8):
         row = 0
-        for x in range(32):
+        for x in range(W):
             if px[x, y] > THRESHOLD:
-                row |= 1 << (31 - x)
+                row |= 1 << (W - 1 - x)
         rows.append(row)
     ys = [y for y, v in enumerate(rows) if v]
     if not ys:
@@ -98,10 +99,19 @@ def main():
     ap.add_argument('--ascii-size', type=int, default=29,
                     help='narrow ASCII render size (default 29, fits 16 cols)')
     ap.add_argument('--label', default='', help='font name shown in logs')
+    ap.add_argument('--glyph-h', type=int, default=32, choices=(32, 40, 48),
+                    help='raster glyph height (default 32; 40/48 = sharper on hi-DPI)')
     args = ap.parse_args()
 
     if not os.path.isfile(args.font):
         sys.exit('font file not found: ' + args.font)
+    global ROWS, ROW_BYTES, GLYPH_BYTES
+    ROWS = args.glyph_h
+    ROW_BYTES = ROWS // 8
+    GLYPH_BYTES = ROWS * ROW_BYTES
+    if args.size < ROWS:
+        args.size = ROWS
+        args.ascii_size = max(args.ascii_size, ROWS * 29 // 32)
     ff = font_for_codepoint(args.font, args.size, args.ascii_size, True)
     fn = font_for_codepoint(args.font, args.size, args.ascii_size, False)
 

@@ -435,7 +435,9 @@ int book_from_menu(Book *b, const Geometry *g, const char *title,
          * index badge and the rest as the bold label. */
         snprintf(row, sizeof(row), "%02d %s", i + 1, items[i] ? items[i] : "");
         book_add_line(b, L_NUM, row, 0, i + 1, 1);
-        book_add_line(b, L_BLANK, "", 0, 0, 1);   /* card paints over this row */
+        /* pad carries the same item_id so a selection landing here still
+         * lights up the whole card */
+        book_add_line(b, L_BLANK, "", 0, i + 1, 1);
     }
     book_finalize(b, g);
     return b->n;
