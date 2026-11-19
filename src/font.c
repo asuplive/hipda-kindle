@@ -187,6 +187,10 @@ int font_draw_text(Font *f, Canvas *c, int x, int y, const char *s,
         if (cp == ' ') { px += cells * th / 2; continue; }
         draw_glyph(f, c, px, y, cp, cells, th, ink);
         if (bold) draw_glyph(f, c, px + bold_off, y, cp, cells, th, ink);
+        if (bold >= 2) {                       /* triple-strike for inverted */
+            draw_glyph(f, c, px - bold_off, y, cp, cells, th, ink);
+            draw_glyph(f, c, px, y - 1, cp, cells, th, ink);
+        }
         px += cells * th / 2;
     }
     return px;

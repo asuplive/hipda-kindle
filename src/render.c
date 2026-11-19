@@ -311,6 +311,8 @@ void render_page(Canvas *c, Font *font, const Geometry *g, const Book *b,
             uint8_t s_col = invert ? ink(theme, INK_WHITE) : ink(theme, INK_GRAY);
             if (invert) {
                 canvas_rect(c, cx, top, cw, ch2, ink(theme, INK_BLACK));
+                /* unmistakable selected marker: bright bar on the left */
+                canvas_rect(c, cx, top, 6 * scale, ch2, ink(theme, INK_WHITE));
             } else {
                 canvas_hline(c, cx, top, cw, ink(theme, INK_BLACK),
                              scale > 1 ? 2 : 1);
@@ -323,13 +325,14 @@ void render_page(Canvas *c, Font *font, const Geometry *g, const Book *b,
             int tx = cx + 16 * g->w / 600;         /* SVG x=48 -> 16px in */
             if (is_top) {
                 font_draw_text(font, c, tx, y, l->text ? l->text : "",
-                               th_title, t_col, 1);
+                               th_title, t_col, invert ? 2 : 1);
                 font_draw_text(font, c, right - 12 * g->w / 600, y,
-                               "›", th_title, t_col, 0);
+                               "›", th_title, t_col, invert ? 2 : 0);
             } else if (l->text && l->text[0] && mate_ok) {
                 int sy = y + (lh - th_sub) / 2;
                 if (sy < y) sy = y;
-                font_draw_text(font, c, tx, sy, l->text, th_sub, s_col, 0);
+                font_draw_text(font, c, tx, sy, l->text, th_sub, s_col,
+                               invert ? 2 : 0);
             }
         } else if (l->kind == L_NUM) {
             /* SVG 07-settings: numbered card, 50px @600 (~2 rows), thin frame
@@ -353,6 +356,7 @@ void render_page(Canvas *c, Font *font, const Geometry *g, const Book *b,
             int top = y - scale;
             if (pressed || selected) {
                 canvas_rect(c, mx, top, span, hh, ink(theme, INK_BLACK));
+                canvas_rect(c, mx, top, 6 * scale, hh, ink(theme, INK_WHITE));
             } else {
                 canvas_frame(c, mx, top, span, hh, ink(theme, INK_BLACK),
                              scale > 1 ? 2 : 1);
@@ -364,12 +368,13 @@ void render_page(Canvas *c, Font *font, const Geometry *g, const Book *b,
             if (vcy < y) vcy = y;
             const char *t = l->text ? l->text : "";
             char num[3] = { t[0], t[1], 0 };
+            int inv = pressed || selected;
             font_draw_text(font, c, x + 20 * g->w / 600, vcy, num,
-                           th_body * 17 / 16, col, 1);
+                           th_body * 17 / 16, col, inv ? 2 : 1);
             font_draw_text(font, c, x + 72 * g->w / 600, vcy, t + 3,
-                           th_title, col, 1);
+                           th_title, col, inv ? 2 : 1);
             font_draw_text(font, c, right - 12 * g->w / 600, vcy, "›",
-                           th_title, col, 0);
+                           th_title, col, inv ? 2 : 0);
         } else if (l->kind == L_FTITLE || l->kind == L_FDESC) {
             int th = (l->kind == L_FDESC) ? th_sub : th_title;
             int press = (i == press_line);
@@ -393,12 +398,12 @@ void render_page(Canvas *c, Font *font, const Geometry *g, const Book *b,
             canvas_rect(c, mx - scale, y - scale, span + 2 * scale,
                         g->cell_h + 2 * scale, ink(theme, INK_BLACK));
             font_draw_text(font, c, x, y, l->text, th_body,
-                           ink(theme, INK_WHITE), 1);
+                           ink(theme, INK_WHITE), 2);
         } else if ((l->kind == L_ITEM || l->kind == L_TITLE) && i == sel_line) {
             canvas_rect(c, mx - scale, y - scale, span + 2 * scale,
                         g->cell_h + 2 * scale, ink(theme, INK_BLACK));
             font_draw_text(font, c, x, y, l->text, th_body,
-                           ink(theme, INK_WHITE), 1);
+                           ink(theme, INK_WHITE), 2);
         } else {
             uint8_t col = ink(theme, INK_BLACK);
             int bold = 0;

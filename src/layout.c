@@ -116,7 +116,9 @@ void book_add_card(Book *b, const char *title, const char *sub, int indent,
         p += n;
     }
     if (*p) memcpy(clip + sused, "...", 4);   /* truncated */
-    push_line(b, L_CARD_B, xstrdup(clip), indent, 0, forum_page);
+    /* subtitle shares the card item_id so a tap anywhere on the card
+     * (including the subtitle) selects it and gets the highlight */
+    push_line(b, L_CARD_B, xstrdup(clip), indent, item_id, forum_page);
 }
 /* Keep Chinese/ASCII closing punctuation attached to the previous line
  * instead of letting it dangle at the start of the next one. */
